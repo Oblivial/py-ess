@@ -4,27 +4,107 @@ A Python library for dynamically loading [European Social Survey (ESS)](https://
 data **on demand**, via the [ESS API](https://api.ess.sikt.no/docs), and exposing it as
 indexable, self-describing, JSON-serializable Python objects.
 
-## Why not just use `pd.read_parquet(url)`?
-
-The ESS API docs already show you can load a datafile directly with pandas in one line.
-If that's all you need, do that — no library required.
-
-`py-ess` exists for the part pandas (or any bare API call) doesn't give you: **the codebook**,
-and **not having to think in terms of datafiles/DOIs at all**. Raw ESS datafiles are just coded
-values (`cntry: "DE"`, `netuse: 0`, ...), organized by round — so normally you first have to look
-up which datafile/DOI you need, download it, and only then dig around inside it. `py-ess` inverts
-that: **variables are the primary thing you index by**, and each variable already knows which
-ESS round(s) it was collected in.
+## Quick start
 
 ```python
-ess.codebook["netusoft"].rounds     # every round DOI this variable was collected in
-ess.load_variable("netusoft", round_="ESS11").decoded()   # -> label strings, no DOI lookup needed
+from pyess import ESS
+
+ess = ESS()
+
+# Look up a variable and see which ESS rounds it was collected in
+variable = ess.codebook["netusoft"]
+print(variable.label)   # "Internet use, how often"
+print(variable.rounds)  # every round DOI it appears in
+
+# Load its data directly, by name + round - no DOI lookup required
+values = ess.load_variable("netusoft", round_="ESS11")
+print(values.decoded())   # ["Never", "Only occasionally", ...] instead of raw codes
 ```
 
-It also joins the official ESS "Datafile codebook" (~2,800 variables across all rounds) to
-whatever datafile you load, so coded survey data becomes self-describing (labels, question
-wording, value → category mappings), adds on-disk caching so repeat loads are instant, and
-generates a stable anonymous identifier for the API's mandatory `userId` parameter.
+See below for loading a whole round's dataset, `[]`/`.` indexing, JSON export, and more.
+
+## Installation
+
+```bash
+pip install -e .
+```
+
+## Guide
+
+### Looking up variables and rounds
+
+```python
+variable = ess.codebook["netusoft"]        # or ess.codebook.netusoft
+variable.label            # "Internet use, how often"
+variable.question_texts   # respondent-facing question wording
+variable.rounds           # every round DOI this variable was collected in
+variable.label_for(1)     # human-readable label for a coded value
+
+ess.codebook.get_round("ESS11")            # -> Round(doi=..., name=..., countries=[...])
+ess.codebook.variables_in_round("ESS11")   # every Variable collected in that round
+```
+
+If a variable was only ever collected in a single round, `round_=` can be omitted from
+`ess.load_variable(...)` and it resolves automatically; if it appears in multiple rounds,
+`round_` is required to disambiguate.
+
+### Loading a whole round's dataset
+
+```python
+dataset = ess.load_round("ESS11")   # same as ess.load(codebook.get_round("ESS11").doi)
+
+len(dataset)                 # number of respondents
+dataset.columns              # variable/column names
+dataset["cntry"].values      # raw coded values, e.g. ["DE", "FR", ...]
+dataset["cntry"].decoded()   # ["Germany", "France", ...]
+dataset[0]                   # first respondent as a dict
+```
+
+You can also load by DOI directly if you already have one: `ess.load("10.21338/ess11e04_2")`.
+
+### `[]` vs. `.` access
+
+Both `dataset["cntry"]` and `dataset.cntry` (likewise `codebook["cntry"]` / `codebook.cntry`)
+return the same thing. This mirrors how `pandas.DataFrame` itself works: `df["col"]` is the
+reliable, fully general form that works for *any* column name, while `df.col` is convenience
+sugar that only works when the name doesn't collide with a real attribute/method (e.g. a
+column literally named `columns` or `to_dict`) and is a valid Python identifier. `py-ess`
+follows the same rule — `.` access is only ever a fallback used when normal attribute lookup
+fails, so real attributes and methods always win and are never silently shadowed. When in
+doubt, or when working with dynamic/unknown column names, prefer `[]`.
+
+### JSON / dict export
+
+```python
+dataset["cntry"].to_dict()   # {"name": ..., "variable": {...}, "values": [...]}
+dataset.to_dict()            # whole dataset: variable metadata + per-respondent records
+dataset.to_records()         # list of per-respondent dicts, no metadata
+
+import json
+json.dumps(dataset.to_dict())
+```
+
+### File formats
+
+`ess.load(...)` / `ess.load_round(...)` accept `file_format="parquet"` (default), `"csv"`,
+`"sav"` (SPSS), or `"dta"` (Stata), and `recode_missing_values=True` to ask the API to recode
+designated missing values (e.g. "Not applicable") to system missing values.
+
+### The `userId` parameter
+
+The ESS API requires a `userId` query parameter on every request. Per the API docs,
+this is used only for usage statistics, not authentication. `py-ess` follows common
+SDK practice (similar to npm/pip telemetry client IDs): it generates a random,
+anonymous `py-ess-<uuid4>` identifier once, caches it in your user config directory,
+and reuses it on every call — no personal data (hostname, IP, username) is embedded.
+
+You can override this:
+
+```python
+ess = ESS(user_id="my-registered-user-id")
+```
+
+or via the `PYESS_USER_ID` environment variable.
 
 ## Features
 
@@ -43,78 +123,22 @@ generates a stable anonymous identifier for the API's mandatory `userId` paramet
 - **No forced registration** — a stable, anonymous `py-ess-<uuid4>` identifier is used
   for the mandatory (non-authenticating) `userId` API parameter, unless you provide your own.
 
-## Installation
+## Why not just use `pd.read_parquet(url)`?
 
-```bash
-pip install -e .
-```
+The ESS API docs already show you can load a datafile directly with pandas in one line.
+If that's all you need, do that — no library required.
 
-## Quick start
+`py-ess` exists for the part pandas (or any bare API call) doesn't give you: **the codebook**,
+and **not having to think in terms of datafiles/DOIs at all**. Raw ESS datafiles are just coded
+values (`cntry: "DE"`, `netuse: 0`, ...), organized by round — so normally you first have to look
+up which datafile/DOI you need, download it, and only then dig around inside it. `py-ess` inverts
+that: **variables are the primary thing you index by**, and each variable already knows which
+ESS round(s) it was collected in. It also joins the official ESS "Datafile codebook" (~2,800
+variables across all rounds) to whatever datafile you load, so coded survey data becomes
+self-describing, adds on-disk caching so repeat loads are instant, and generates a stable
+anonymous identifier for the API's mandatory `userId` parameter.
 
-```python
-from pyess import ESS
-
-ess = ESS()  # uses an auto-generated anonymous userId (see below)
-
-# Variables are the primary namespace: look one up by name...
-variable = ess.codebook["netusoft"]
-print(variable.label)   # "Internet use, how often"
-print(variable.rounds)  # ['10.21338/ess8e02_3', '10.21338/ess9e03_3', ...] - every round it's in
-
-# ...and load its data directly, by name + round, no DOI lookup required
-values = ess.load_variable("netusoft", round_="ESS11")
-print(values.decoded())          # ["Never", "Only occasionally", ...] instead of raw codes
-print(values.variable.label)     # "Internet use, how often"
-
-# If a variable only exists in a single round, `round_=` can be omitted entirely
-# (netusoft exists in several rounds, so it must be disambiguated above)
-
-# You can still load a whole round's datafile if you want everything at once
-dataset = ess.load_round("ESS11")               # same as ess.load(codebook.get_round("ESS11").doi)
-print(len(dataset))                 # number of respondents
-print(dataset.columns)              # variable/column names
-print(dataset["cntry"].values)      # raw coded values, e.g. ["DE", "FR", ...]
-print(dataset.cntry.values)         # same thing, attribute-style
-print(dataset["cntry"].decoded())   # ["Germany", "France", ...]
-print(dataset[0])                   # first respondent as a dict
-
-# Round discovery, if useful: which countries participated, etc.
-round_ = ess.codebook.get_round("ESS11")
-print(round_.doi, round_.countries)
-
-# Full JSON-serializable representation (variable metadata + records)
-import json
-json.dumps(dataset.to_dict())
-```
-
-### `[]` vs. `.` access
-
-Both `dataset["cntry"]` and `dataset.cntry` (likewise `codebook["cntry"]` / `codebook.cntry`)
-return the same thing. This mirrors how `pandas.DataFrame` itself works: `df["col"]` is the
-reliable, fully general form that works for *any* column name, while `df.col` is convenience
-sugar that only works when the name doesn't collide with a real attribute/method (e.g. a
-column literally named `columns` or `to_dict`) and is a valid Python identifier. `py-ess`
-follows the same rule — `.` access is only ever a fallback used when normal attribute lookup
-fails, so real attributes and methods always win and are never silently shadowed. When in
-doubt, or when working with dynamic/unknown column names, prefer `[]`.
-
-## The `userId` parameter
-
-The ESS API requires a `userId` query parameter on every request. Per the API docs,
-this is used only for usage statistics, not authentication. `py-ess` follows common
-SDK practice (similar to npm/pip telemetry client IDs): it generates a random,
-anonymous `py-ess-<uuid4>` identifier once, caches it in your user config directory,
-and reuses it on every call — no personal data (hostname, IP, username) is embedded.
-
-You can override this:
-
-```python
-ess = ESS(user_id="my-registered-user-id")
-```
-
-or via the `PYESS_USER_ID` environment variable.
-
-## Where the variable ↔ round mapping comes from
+## Internals: where the variable ↔ round mapping comes from
 
 ESS's own bundled "Datafile codebook" (the source `py-ess` uses for variable labels, question
 text, and value labels) lists every variable exactly once, with **no record of which round(s)**
@@ -134,3 +158,4 @@ script and commit the updated `rounds.json` whenever a new round/edition ships.
 pip install -e ".[dev]"
 pytest
 ```
+
