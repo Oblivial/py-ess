@@ -9,7 +9,7 @@ description = "Dynamically load and index European Social Survey (ESS) data on d
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "py-ess contributors" }]
+authors = [{ name = "Luka Lauk (Oblivial)" }]
 dependencies = [
     "requests>=2.28",
     "pandas>=1.5",
