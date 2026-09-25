@@ -25,8 +25,23 @@ See below for loading a whole round's dataset, `[]`/`.` indexing, JSON export, a
 
 ## Installation
 
+`py-ess` is currently in beta and not yet published to PyPI. Install directly from GitHub:
+
 ```bash
-pip install -e .
+pip install git+https://github.com/Oblivial/py-ess.git@v0.1.0b1
+```
+
+This pins to the [`v0.1.0b1`](https://github.com/Oblivial/py-ess/releases/tag/v0.1.0b1) tag, so
+your install won't change under you as development continues on `main`. Drop the `@v0.1.0b1`
+(i.e. just `pip install git+https://github.com/Oblivial/py-ess.git`) to track the latest commit
+on `main` instead.
+
+For local development (editable install, e.g. from a clone of this repo):
+
+```bash
+git clone https://github.com/Oblivial/py-ess.git
+cd py-ess
+pip install -e ".[dev]"
 ```
 
 ## Guide

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-ess"
-version = "0.1.0"
+version = "0.1.0b1"
 description = "Dynamically load and index European Social Survey (ESS) data on demand."
 readme = "README.md"
 requires-python = ">=3.9"
