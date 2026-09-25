@@ -152,10 +152,30 @@ edition (a few times per year at most), so it's committed as a static resource r
 fetched at runtime — no live scraping happens when you import or use `py-ess`. Re-run the
 script and commit the updated `rounds.json` whenever a new round/edition ships.
 
+## Internals: keeping the package small
+
+The official ESS codebook is a ~10MB HTML file. Rather than shipping that raw file (and paying
+tens of seconds of parsing cost on every fresh install), `py-ess` ships a pre-parsed,
+gzip-compressed JSON snapshot instead (`src/pyess/resources/codebook.json.gz`, ~360KB — about
+25x smaller), built by [`scripts/build_codebook_json.py`](scripts/build_codebook_json.py). This
+snapshot already has the round-membership mapping above joined in, so loading it at runtime is
+just a gzip decompress + `json.loads` (near-instant), no HTML parsing required.
+
+The raw `codebook.html` and `rounds.json` stay in the git repo as the build step's source
+input, but are excluded from built sdists/wheels (see `pyproject.toml`). If you're developing
+`py-ess` itself and change `codebook.html` or `rounds.json`, re-run the build script and commit
+the updated `codebook.json.gz`:
+
+```bash
+python scripts/build_rounds_index.py    # only if a new ESS round/edition was released
+python scripts/build_codebook_json.py
+```
+
 ## Development
 
 ```bash
 pip install -e ".[dev]"
 pytest
 ```
+
 

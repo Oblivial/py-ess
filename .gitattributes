@@ -6,3 +6,6 @@ src/pyess/resources/*.html linguist-vendored
 src/pyess/resources/*.json linguist-vendored
 src/pyess/resources/*.html linguist-generated
 src/pyess/resources/*.json linguist-generated
+src/pyess/resources/*.json.gz linguist-vendored
+src/pyess/resources/*.json.gz linguist-generated
+src/pyess/resources/*.json.gz binary

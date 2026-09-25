@@ -9,6 +9,7 @@ serializable via ``.to_dict()``.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import re
@@ -96,15 +97,27 @@ class Codebook:
 
     @classmethod
     def load_bundled(cls) -> Codebook:
-        """Load the codebook shipped with the package: variable labels/question
-        text/value labels from ``resources/codebook.html``, joined with the
-        variable-to-round membership index from ``resources/rounds.json``
-        (built once, offline, by ``scripts/build_rounds_index.py``).
+        """Load the codebook shipped with the package.
 
-        Parsing the ~10MB bundled HTML with BeautifulSoup takes tens of
-        seconds, so the parsed+joined result is cached as JSON on disk (keyed
-        by a hash of both source files) for near-instant subsequent loads.
+        The package ships a pre-parsed, gzip-compressed JSON snapshot
+        (``resources/codebook.json.gz``) - variable labels/question
+        text/value labels already joined with round membership from
+        ``resources/rounds.json`` - built once by
+        ``scripts/build_codebook_json.py`` (which itself runs
+        ``scripts/build_rounds_index.py`` first). This avoids shipping the
+        ~10MB raw codebook HTML in the distributed package (the compressed
+        snapshot is roughly 25x smaller) and avoids the tens-of-seconds
+        BeautifulSoup parse cost on every fresh install.
+
+        For local development (e.g. before running the build script, or if
+        the snapshot is missing for some other reason) this falls back to
+        parsing ``resources/codebook.html`` directly, caching the result on
+        disk exactly as before.
         """
+        snapshot = _load_bundled_snapshot()
+        if snapshot is not None:
+            return cls.from_dict(snapshot)
+
         html = (
             resources.files("pyess.resources")
             .joinpath("codebook.html")
@@ -300,6 +313,25 @@ def _parse_variables(soup: BeautifulSoup) -> list[Variable]:
 def load_bundled_codebook() -> Codebook:
     """Module-level cached accessor so repeated calls don't reparse the HTML."""
     return Codebook.load_bundled()
+
+
+@lru_cache(maxsize=1)
+def _load_bundled_snapshot() -> dict[str, Any] | None:
+    """Load the pre-parsed, gzip-compressed codebook snapshot
+    (``resources/codebook.json.gz``), built offline by
+    ``scripts/build_codebook_json.py``. Returns ``None`` if the resource is
+    missing (e.g. in a dev checkout before the build script has been run),
+    so callers can fall back to parsing the raw HTML.
+    """
+    try:
+        compressed = (
+            resources.files("pyess.resources")
+            .joinpath("codebook.json.gz")
+            .read_bytes()
+        )
+    except (FileNotFoundError, ModuleNotFoundError):
+        return None
+    return json.loads(gzip.decompress(compressed).decode("utf-8"))
 
 
 @lru_cache(maxsize=1)
