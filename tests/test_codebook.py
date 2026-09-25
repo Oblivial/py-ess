@@ -34,6 +34,28 @@ def test_variable_with_question_text():
     assert var.label_for("0") == "No access at home or work"
 
 
+def test_attribute_access_for_variables():
+    codebook = load_bundled_codebook()
+    assert codebook.cntry is codebook["cntry"]
+    assert codebook.cntry.label == "Country"
+
+
+def test_attribute_access_does_not_shadow_real_attributes():
+    codebook = load_bundled_codebook()
+    # `.variables` is a real property and must never be confused with a
+    # variable literally named "variables" (there isn't one in ESS, but the
+    # precedence must hold regardless).
+    assert isinstance(codebook.variables, list)
+
+
+def test_attribute_access_raises_for_unknown_name():
+    codebook = load_bundled_codebook()
+    import pytest
+
+    with pytest.raises(AttributeError):
+        codebook.definitely_not_a_variable
+
+
 def test_codebook_to_dict_is_json_serializable():
     import json
 

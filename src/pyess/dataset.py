@@ -113,6 +113,24 @@ class Dataset:
             return self._df.iloc[key].to_dict()
         raise TypeError(f"Unsupported index type for Dataset: {type(key)!r}")
 
+    def __getattr__(self, name: str) -> Any:
+        # Only called when normal attribute lookup fails, so this never
+        # shadows real attributes/methods (e.g. `.columns`, `.to_dict`) -
+        # mirroring pandas' `df.column_name` convenience accessor.
+        df = self.__dict__.get("_df")
+        if df is not None and name in df.columns:
+            return self._series_view(name)
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r} "
+            f"(no such column either; use dataset[{name!r}] to check safely)"
+        )
+
+    def __dir__(self) -> List[str]:
+        # Enables tab-completion for column names in IDEs/notebooks.
+        return list(super().__dir__()) + [
+            c for c in self.columns if c.isidentifier()
+        ]
+
     def _series_view(self, column: str) -> SeriesView:
         variable = self._codebook.get_variable(column) if self._codebook else None
         return SeriesView(column, self._df[column], variable)

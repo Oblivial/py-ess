@@ -34,6 +34,14 @@ def test_load_downloads_and_caches(tmp_path, sample_parquet_bytes):
     assert dataset["cntry"].decoded() == ["Germany", "France"]
     assert dataset[0] == {"idno": 1, "cntry": "DE"}
 
+    # Attribute-style access is equivalent to item-style access for columns.
+    assert dataset.cntry.values == dataset["cntry"].values
+    assert dataset.idno.values == [1, 2]
+    with pytest.raises(AttributeError):
+        dataset.not_a_real_column
+    # Real attributes/methods always take precedence over columns.
+    assert dataset.columns == ["idno", "cntry"]
+
     cache_file = tmp_path / "10.21338" / "ess11e04_2.parquet"
     assert cache_file.exists()
 

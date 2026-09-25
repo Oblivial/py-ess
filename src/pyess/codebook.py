@@ -123,6 +123,24 @@ class Codebook:
     def get_variable(self, variable_id: str) -> Optional[Variable]:
         return self._variables_by_id.get(variable_id)
 
+    def __getattr__(self, name: str) -> Variable:
+        # Convenience accessor mirroring __getitem__; only triggered when
+        # normal attribute lookup fails, so real attributes/methods (e.g.
+        # `.variables`, `.datafiles`) always take precedence and are never
+        # shadowed by a variable of the same name.
+        variables_by_id = self.__dict__.get("_variables_by_id")
+        if variables_by_id is not None and name in variables_by_id:
+            return variables_by_id[name]
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r} "
+            f"(no such variable either; use codebook[{name!r}] to check safely)"
+        )
+
+    def __dir__(self) -> List[str]:
+        return list(super().__dir__()) + [
+            v for v in self._variables_by_id if v.isidentifier()
+        ]
+
     def find_datafile(self, name_substring: str) -> Optional[Datafile]:
         """Find the first datafile whose name contains ``name_substring``
         (case-insensitive)."""
