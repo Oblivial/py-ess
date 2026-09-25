@@ -1,0 +1,8 @@
+# Tell GitHub Linguist to ignore bundled/generated data files when computing
+# the repo's "Languages" breakdown, so the project shows up as Python instead
+# of HTML (the bundled ESS codebook is ~10MB of static HTML/JSON data, not
+# source code).
+src/pyess/resources/*.html linguist-vendored
+src/pyess/resources/*.json linguist-vendored
+src/pyess/resources/*.html linguist-generated
+src/pyess/resources/*.json linguist-generated
