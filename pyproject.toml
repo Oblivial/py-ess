@@ -27,4 +27,4 @@ dev = ["pytest>=7.0", "responses>=0.23", "pyreadstat>=1.2"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-pyess = ["resources/*.html"]
+pyess = ["resources/*.html", "resources/*.json"]

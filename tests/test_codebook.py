@@ -56,7 +56,32 @@ def test_attribute_access_raises_for_unknown_name():
         codebook.definitely_not_a_variable
 
 
-def test_codebook_to_dict_is_json_serializable():
+def test_variable_has_round_membership():
+    codebook = load_bundled_codebook()
+    var = codebook["netusoft"]
+    assert len(var.rounds) >= 1
+    assert all(doi.startswith("10.21338/") for doi in var.rounds)
+
+
+def test_get_round_by_label_and_doi():
+    codebook = load_bundled_codebook()
+    by_label = codebook.get_round("ESS11")
+    assert by_label is not None
+    assert by_label.doi == "10.21338/ess11e04_2"
+    by_doi = codebook.get_round("10.21338/ess11e04_2")
+    assert by_doi is by_label
+    assert codebook.get_round("nope-not-a-round") is None
+
+
+def test_variables_in_round():
+    codebook = load_bundled_codebook()
+    variables = codebook.variables_in_round("ESS1")
+    assert len(variables) > 100
+    names = {v.id for v in variables}
+    assert "essround" in names
+
+
+
     import json
 
     codebook = load_bundled_codebook()

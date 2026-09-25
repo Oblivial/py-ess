@@ -70,6 +70,42 @@ def test_invalid_doi_raises_value_error(tmp_path):
         ess.load("not-a-doi")
 
 
+@responses.activate
+def test_load_round_by_label(tmp_path, sample_parquet_bytes):
+    responses.add(
+        responses.GET,
+        "https://api.ess.sikt.no/v1/data/dataFile/10.21338/ess11e04_2",
+        body=sample_parquet_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+    ess = ESS(user_id="py-ess-test", cache_dir=tmp_path)
+    dataset = ess.load_round("ESS11")
+    assert dataset.columns == ["idno", "cntry"]
+    assert dataset.datafile.doi == "10.21338/ess11e04_2"
+
+
+@responses.activate
+def test_load_variable_by_name_and_round(tmp_path, sample_parquet_bytes):
+    responses.add(
+        responses.GET,
+        "https://api.ess.sikt.no/v1/data/dataFile/10.21338/ess11e04_2",
+        body=sample_parquet_bytes,
+        status=200,
+        content_type="application/octet-stream",
+    )
+    ess = ESS(user_id="py-ess-test", cache_dir=tmp_path)
+    series = ess.load_variable("cntry", round_="ESS11")
+    assert series.values == ["DE", "FR"]
+    assert series.decoded() == ["Germany", "France"]
+
+
+def test_load_variable_unknown_round_raises(tmp_path):
+    ess = ESS(user_id="py-ess-test", cache_dir=tmp_path)
+    with pytest.raises(KeyError):
+        ess.load_variable("cntry", round_="not-a-real-round")
+
+
 def test_dataset_to_dict_includes_variable_metadata(tmp_path, sample_parquet_bytes):
     import responses as resp_module
 

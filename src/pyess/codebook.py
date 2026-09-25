@@ -29,28 +29,27 @@ except ImportError:  # pragma: no cover
         base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~/.cache")
         return str(Path(base) / appname)
 
-from .models import Variable, ValueLabel
+from .models import Variable, ValueLabel, Round
 
 _DOI_RE = re.compile(r"doi\.org/(?P<doi>10\.\d+/\S+)")
+_ROUND_LABEL_RE = re.compile(r"ess(?P<num>\d+)(?P<sc>sc)?e", re.IGNORECASE)
+
+# Backwards-compatible alias: earlier versions of py-ess called this
+# `Datafile`. `Round` is the same concept, renamed now that variables (not
+# datafiles) are the primary thing users index.
+Datafile = Round
 
 
-@dataclass
-class Datafile:
-    """A single ESS datafile entry (e.g. one round/edition) from the codebook."""
-
-    name: str
-    doi: str
-
-    @property
-    def doi_prefix(self) -> str:
-        return self.doi.split("/", 1)[0]
-
-    @property
-    def doi_suffix(self) -> str:
-        return self.doi.split("/", 1)[1]
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {"name": self.name, "doi": self.doi}
+def _round_label(doi: str) -> str:
+    """Derive a short human-friendly label (e.g. "ESS11", "ESS10SC") from a
+    round's DOI suffix (e.g. "ess11e04_2", "ess10sce03_2")."""
+    match = _ROUND_LABEL_RE.search(doi)
+    if not match:
+        return doi
+    label = f"ESS{match.group('num')}"
+    if match.group("sc"):
+        label += "SC"
+    return label
 
 
 class Codebook:
@@ -61,48 +60,75 @@ class Codebook:
     plain dict/JSON structures.
     """
 
-    def __init__(self, datafiles: List[Datafile], variables: List[Variable]):
-        self._datafiles = datafiles
+    def __init__(self, rounds: List[Round], variables: List[Variable]):
+        self._rounds = rounds
         self._variables = variables
-        self._datafiles_by_doi = {d.doi: d for d in datafiles}
+        self._rounds_by_doi = {r.doi: r for r in rounds}
         self._variables_by_id = {v.id: v for v in variables}
 
     # -- construction ------------------------------------------------
     @classmethod
-    def from_html(cls, html: str) -> "Codebook":
+    def from_html(cls, html: str, rounds_index: Optional[Dict[str, Any]] = None) -> "Codebook":
+        """Parse the codebook HTML (labels/question text/value labels) and
+        optionally join it with a round index (see ``rounds.json``, built by
+        ``scripts/build_rounds_index.py``) that records which rounds each
+        variable was collected in.
+        """
         try:
             soup = BeautifulSoup(html, "lxml")
         except Exception:  # pragma: no cover - lxml not installed
             soup = BeautifulSoup(html, "html.parser")
-        datafiles = _parse_datafiles(soup)
+        parsed_rounds = _parse_datafiles(soup)
         variables = _parse_variables(soup)
-        return cls(datafiles, variables)
+
+        if rounds_index:
+            rounds, variable_rounds = _rounds_and_membership_from_index(rounds_index)
+            # Prefer the richer round list from the index (has countries),
+            # but fall back to whatever the static HTML listed if the index
+            # is missing/stale for some reason.
+            rounds_by_doi = {r.doi: r for r in rounds} or {r.doi: r for r in parsed_rounds}
+            for variable in variables:
+                variable.rounds = variable_rounds.get(variable.id, [])
+            return cls(list(rounds_by_doi.values()) or parsed_rounds, variables)
+
+        return cls(parsed_rounds, variables)
 
     @classmethod
     def load_bundled(cls) -> "Codebook":
-        """Load the codebook shipped with the package (resources/codebook.html).
+        """Load the codebook shipped with the package: variable labels/question
+        text/value labels from ``resources/codebook.html``, joined with the
+        variable-to-round membership index from ``resources/rounds.json``
+        (built once, offline, by ``scripts/build_rounds_index.py``).
 
         Parsing the ~10MB bundled HTML with BeautifulSoup takes tens of
-        seconds, so the parsed result is cached as JSON on disk (keyed by a
-        hash of the source HTML) for near-instant subsequent loads.
+        seconds, so the parsed+joined result is cached as JSON on disk (keyed
+        by a hash of both source files) for near-instant subsequent loads.
         """
         html = (
             resources.files("pyess.resources")
             .joinpath("codebook.html")
             .read_text(encoding="utf-8")
         )
-        cached = _load_from_disk_cache(html)
+        rounds_index = _load_bundled_rounds_index()
+        cache_key = html + json.dumps(rounds_index, sort_keys=True)
+
+        cached = _load_from_disk_cache(cache_key)
         if cached is not None:
             return cached
 
-        codebook = cls.from_html(html)
-        _save_to_disk_cache(html, codebook)
+        codebook = cls.from_html(html, rounds_index)
+        _save_to_disk_cache(cache_key, codebook)
         return codebook
 
     # -- indexing ------------------------------------------------------
     @property
-    def datafiles(self) -> List[Datafile]:
-        return list(self._datafiles)
+    def rounds(self) -> List[Round]:
+        return list(self._rounds)
+
+    @property
+    def datafiles(self) -> List[Round]:
+        # Backwards-compatible alias for `.rounds`.
+        return self.rounds
 
     @property
     def variables(self) -> List[Variable]:
@@ -123,10 +149,16 @@ class Codebook:
     def get_variable(self, variable_id: str) -> Optional[Variable]:
         return self._variables_by_id.get(variable_id)
 
+    def variables_in_round(self, round_: str) -> List[Variable]:
+        """All variables collected in a given round, identified by DOI or by
+        short label (e.g. ``"ESS11"``, case-insensitive)."""
+        doi = self._resolve_round_doi(round_)
+        return [v for v in self._variables if doi in v.rounds]
+
     def __getattr__(self, name: str) -> Variable:
         # Convenience accessor mirroring __getitem__; only triggered when
         # normal attribute lookup fails, so real attributes/methods (e.g.
-        # `.variables`, `.datafiles`) always take precedence and are never
+        # `.variables`, `.rounds`) always take precedence and are never
         # shadowed by a variable of the same name.
         variables_by_id = self.__dict__.get("_variables_by_id")
         if variables_by_id is not None and name in variables_by_id:
@@ -141,38 +173,59 @@ class Codebook:
             v for v in self._variables_by_id if v.isidentifier()
         ]
 
-    def find_datafile(self, name_substring: str) -> Optional[Datafile]:
-        """Find the first datafile whose name contains ``name_substring``
+    def find_datafile(self, name_substring: str) -> Optional[Round]:
+        """Find the first round whose name contains ``name_substring``
         (case-insensitive)."""
         needle = name_substring.lower()
-        for d in self._datafiles:
+        for d in self._rounds:
             if needle in d.name.lower():
                 return d
         return None
 
-    def get_datafile(self, doi: str) -> Optional[Datafile]:
-        return self._datafiles_by_doi.get(doi)
+    def get_datafile(self, doi: str) -> Optional[Round]:
+        return self._rounds_by_doi.get(doi)
+
+    def get_round(self, round_: str) -> Optional[Round]:
+        """Look up a round by DOI or short label (e.g. ``"ESS11"``)."""
+        if round_ in self._rounds_by_doi:
+            return self._rounds_by_doi[round_]
+        needle = round_.lower()
+        for r in self._rounds:
+            if _round_label(r.doi).lower() == needle:
+                return r
+        return None
+
+    def _resolve_round_doi(self, round_: str) -> str:
+        round_obj = self.get_round(round_)
+        if round_obj is None:
+            raise KeyError(f"Unknown ESS round {round_!r}")
+        return round_obj.doi
 
     # -- serialization ---------------------------------------------------
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "datafiles": [d.to_dict() for d in self._datafiles],
+            "rounds": [r.to_dict() for r in self._rounds],
             "variables": {v.id: v.to_dict() for v in self._variables},
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Codebook":
-        datafiles = [Datafile(name=d["name"], doi=d["doi"]) for d in data["datafiles"]]
+        rounds_data = data.get("rounds", data.get("datafiles", []))
+        rounds = [
+            Round(doi=r["doi"], name=r["name"], countries=list(r.get("countries", [])))
+            for r in rounds_data
+        ]
         variables = [
             Variable(
                 id=v["id"],
                 label=v["label"],
                 question_texts=list(v["question_texts"]),
                 value_labels=[ValueLabel(**vl) for vl in v["value_labels"]],
+                rounds=list(v.get("rounds", [])),
             )
             for v in data["variables"].values()
         ]
-        return cls(datafiles, variables)
+        return cls(rounds, variables)
 
 
 def _parse_datafiles(soup: BeautifulSoup) -> List[Datafile]:
@@ -195,7 +248,7 @@ def _parse_datafiles(soup: BeautifulSoup) -> List[Datafile]:
                     if match:
                         doi = match.group("doi")
             if doi:
-                datafiles.append(Datafile(name=name, doi=doi))
+                datafiles.append(Round(name=name, doi=doi))
     return datafiles
 
 
@@ -248,13 +301,46 @@ def load_bundled_codebook() -> Codebook:
     return Codebook.load_bundled()
 
 
-def _disk_cache_path(html: str) -> Path:
-    digest = hashlib.sha256(html.encode("utf-8")).hexdigest()[:16]
+@lru_cache(maxsize=1)
+def _load_bundled_rounds_index() -> Optional[Dict[str, Any]]:
+    """Load the pre-scraped variable-to-round membership index
+    (``resources/rounds.json``), built offline by
+    ``scripts/build_rounds_index.py``. Returns ``None`` if the resource is
+    missing so callers can gracefully fall back to round-less variables.
+    """
+    try:
+        text = (
+            resources.files("pyess.resources")
+            .joinpath("rounds.json")
+            .read_text(encoding="utf-8")
+        )
+    except (FileNotFoundError, ModuleNotFoundError):  # pragma: no cover
+        return None
+    return json.loads(text)
+
+
+def _rounds_and_membership_from_index(
+    rounds_index: Dict[str, Any]
+) -> "tuple[List[Round], Dict[str, List[str]]]":
+    """Turn the raw rounds.json structure into ``Round`` objects plus a
+    variable id -> list-of-round-DOIs membership mapping."""
+    rounds: List[Round] = []
+    variable_rounds: Dict[str, List[str]] = {}
+    for entry in rounds_index.get("rounds", []):
+        doi = entry["doi"]
+        rounds.append(Round(doi=doi, name=entry["name"], countries=list(entry.get("countries", []))))
+        for var in entry.get("variables", []):
+            variable_rounds.setdefault(var["name"], []).append(doi)
+    return rounds, variable_rounds
+
+
+def _disk_cache_path(cache_key: str) -> Path:
+    digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:16]
     return Path(user_cache_dir("py-ess")) / f"codebook-{digest}.json"
 
 
-def _load_from_disk_cache(html: str) -> Optional[Codebook]:
-    path = _disk_cache_path(html)
+def _load_from_disk_cache(cache_key: str) -> Optional[Codebook]:
+    path = _disk_cache_path(cache_key)
     if not path.exists():
         return None
     try:
@@ -264,8 +350,8 @@ def _load_from_disk_cache(html: str) -> Optional[Codebook]:
         return None
 
 
-def _save_to_disk_cache(html: str, codebook: Codebook) -> None:
-    path = _disk_cache_path(html)
+def _save_to_disk_cache(cache_key: str, codebook: Codebook) -> None:
+    path = _disk_cache_path(cache_key)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(codebook.to_dict()), encoding="utf-8")

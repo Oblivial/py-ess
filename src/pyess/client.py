@@ -6,7 +6,7 @@ import io
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 import requests
@@ -21,7 +21,7 @@ except ImportError:  # pragma: no cover
         return str(Path(base) / appname)
 
 from .codebook import Codebook
-from .dataset import Dataset
+from .dataset import Dataset, SeriesView
 from .userid import get_user_id
 
 logger = logging.getLogger("pyess")
@@ -122,6 +122,59 @@ class ESS:
         dataframe = _parse_content(content, file_format)
         datafile = self.codebook.get_datafile(doi)
         return Dataset(dataframe, datafile=datafile, codebook=self.codebook)
+
+    def load_round(self, round_: str, **kwargs: Any) -> Dataset:
+        """Load a full ESS round's datafile, identified by DOI or short label
+        (e.g. ``"ESS11"``). Equivalent to ``self.load(round_doi, **kwargs)``
+        but lets you skip the datafile/DOI lookup step."""
+        round_obj = self.codebook.get_round(round_)
+        if round_obj is None:
+            raise KeyError(f"Unknown ESS round {round_!r}")
+        return self.load(round_obj.doi, **kwargs)
+
+    def load_variable(
+        self,
+        variable: str,
+        round_: Optional[str] = None,
+        **kwargs: Any,
+    ) -> "SeriesView":
+        """Load a single variable's data, indexed purely by name (and,
+        optionally, round) - without the caller ever having to look up a
+        datafile/DOI themselves.
+
+        Parameters
+        ----------
+        variable:
+            Variable name, e.g. ``"netusoft"``.
+        round_:
+            Which ESS round to load it from, by DOI or short label (e.g.
+            ``"ESS11"``). Required if the variable was collected in more than
+            one round; if omitted and the variable exists in exactly one
+            round, that round is used automatically.
+        """
+        var = self.codebook.get_variable(variable)
+        if var is None:
+            raise KeyError(f"Unknown ESS variable {variable!r}")
+
+        if round_ is not None:
+            doi = self.codebook._resolve_round_doi(round_)
+            if doi not in var.rounds:
+                raise KeyError(
+                    f"Variable {variable!r} was not collected in round {round_!r}; "
+                    f"available rounds: {var.rounds}"
+                )
+        elif len(var.rounds) == 1:
+            doi = var.rounds[0]
+        elif len(var.rounds) == 0:
+            raise KeyError(f"Variable {variable!r} has no known round membership")
+        else:
+            raise ValueError(
+                f"Variable {variable!r} appears in multiple rounds ({var.rounds}); "
+                "pass `round_=` to disambiguate"
+            )
+
+        dataset = self.load(doi, **kwargs)
+        return dataset[variable]
 
     def _download(
         self, doi_prefix: str, doi_suffix: str, file_format: str, recode_missing_values: bool

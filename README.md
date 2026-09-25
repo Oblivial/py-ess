@@ -9,32 +9,36 @@ indexable, self-describing, JSON-serializable Python objects.
 The ESS API docs already show you can load a datafile directly with pandas in one line.
 If that's all you need, do that — no library required.
 
-`py-ess` exists for the part pandas (or any bare API call) doesn't give you: **the codebook**.
-Raw ESS datafiles are just coded values (`cntry: "DE"`, `netuse: 0`, ...). On their own they
-carry no labels, no question wording, and no value → category mappings. `py-ess` parses the
-official ESS "Datafile codebook" (~2,800 variables across all rounds) once and automatically
-joins it to whatever datafile you load, so coded survey data becomes self-describing:
+`py-ess` exists for the part pandas (or any bare API call) doesn't give you: **the codebook**,
+and **not having to think in terms of datafiles/DOIs at all**. Raw ESS datafiles are just coded
+values (`cntry: "DE"`, `netuse: 0`, ...), organized by round — so normally you first have to look
+up which datafile/DOI you need, download it, and only then dig around inside it. `py-ess` inverts
+that: **variables are the primary thing you index by**, and each variable already knows which
+ESS round(s) it was collected in.
 
 ```python
-dataset["netuse"].decoded()        # ["No access at home or work", ...] instead of [0, ...]
-dataset["netuse"].variable.label   # "Personal use of internet/e-mail/www"
+ess.codebook["netusoft"].rounds     # every round DOI this variable was collected in
+ess.load_variable("netusoft", round_="ESS11").decoded()   # -> label strings, no DOI lookup needed
 ```
 
-It also adds datafile/round discovery (`codebook.find_datafile("ESS11")` instead of
-manually looking up DOIs), on-disk caching so repeat loads are instant, and a stable
-anonymous identifier for the API's mandatory `userId` parameter. Everything else
-(attribute access, `.to_dict()`, etc.) is convenience sugar on top.
+It also joins the official ESS "Datafile codebook" (~2,800 variables across all rounds) to
+whatever datafile you load, so coded survey data becomes self-describing (labels, question
+wording, value → category mappings), adds on-disk caching so repeat loads are instant, and
+generates a stable anonymous identifier for the API's mandatory `userId` parameter.
 
 ## Features
 
+- **Variable-first indexing** — look up a variable by name (`codebook["netusoft"]`), see every
+  ESS round it appears in (`.rounds`), and load its data directly (`ess.load_variable(...)`)
+  without ever having to look up a DOI yourself.
 - **Lazy, on-demand loading** — datafiles are only downloaded when you ask for them,
   and are cached on disk (`platformdirs` user cache directory) so repeat access is instant.
 - **Codebook-joined metadata** — variable labels, respondent-facing question text, and
   coded value → category label mappings, automatically matched to any loaded dataset.
 - **Indexable like a dict/JSON object** — `dataset["netuse"]` or `dataset.netuse`,
   `dataset[0]`, `dataset.to_dict()`.
-- **Datafile/round discovery** — `codebook.find_datafile("ESS11")` instead of manually
-  looking up DOIs from the docs.
+- **Round discovery** — `codebook.get_round("ESS11")` / `codebook.variables_in_round("ESS11")`,
+  including which countries participated, without manually looking up DOIs from the docs.
 - **Multiple wire formats** — `parquet` (default), `csv`, `sav` (SPSS), `dta` (Stata).
 - **No forced registration** — a stable, anonymous `py-ess-<uuid4>` identifier is used
   for the mandatory (non-authenticating) `userId` API parameter, unless you provide your own.
@@ -52,22 +56,31 @@ from pyess import ESS
 
 ess = ESS()  # uses an auto-generated anonymous userId (see below)
 
-# Browse the codebook (parsed from the bundled ESS "Datafile codebook")
-codebook = ess.codebook
-datafile = codebook.find_datafile("ESS11")
-print(datafile.doi)  # "10.21338/ess11e04_2"
+# Variables are the primary namespace: look one up by name...
+variable = ess.codebook["netusoft"]
+print(variable.label)   # "Internet use, how often"
+print(variable.rounds)  # ['10.21338/ess8e02_3', '10.21338/ess9e03_3', ...] - every round it's in
 
-# Download (or load from local cache) the actual data
-dataset = ess.load(datafile.doi)  # defaults to fileFormat=parquet
+# ...and load its data directly, by name + round, no DOI lookup required
+values = ess.load_variable("netusoft", round_="ESS11")
+print(values.decoded())          # ["Never", "Only occasionally", ...] instead of raw codes
+print(values.variable.label)     # "Internet use, how often"
 
-# Index like a dict - or, as a convenience, like an attribute
+# If a variable only exists in a single round, `round_=` can be omitted entirely
+# (netusoft exists in several rounds, so it must be disambiguated above)
+
+# You can still load a whole round's datafile if you want everything at once
+dataset = ess.load_round("ESS11")               # same as ess.load(codebook.get_round("ESS11").doi)
 print(len(dataset))                 # number of respondents
 print(dataset.columns)              # variable/column names
 print(dataset["cntry"].values)      # raw coded values, e.g. ["DE", "FR", ...]
 print(dataset.cntry.values)         # same thing, attribute-style
 print(dataset["cntry"].decoded())   # ["Germany", "France", ...]
-print(dataset["cntry"].variable.label)  # "Country"
 print(dataset[0])                   # first respondent as a dict
+
+# Round discovery, if useful: which countries participated, etc.
+round_ = ess.codebook.get_round("ESS11")
+print(round_.doi, round_.countries)
 
 # Full JSON-serializable representation (variable metadata + records)
 import json
@@ -101,27 +114,19 @@ ess = ESS(user_id="my-registered-user-id")
 
 or via the `PYESS_USER_ID` environment variable.
 
-## Development
+## Where the variable ↔ round mapping comes from
 
-```bash
-pip install -e ".[dev]"
-pytest
-```
+ESS's own bundled "Datafile codebook" (the source `py-ess` uses for variable labels, question
+text, and value labels) lists every variable exactly once, with **no record of which round(s)**
+it was collected in. That mapping isn't published anywhere in the public ESS API either.
 
-
-The ESS API requires a `userId` query parameter on every request. Per the API docs,
-this is used only for usage statistics, not authentication. `py-ess` follows common
-SDK practice (similar to npm/pip telemetry client IDs): it generates a random,
-anonymous `py-ess-<uuid4>` identifier once, caches it in your user config directory,
-and reuses it on every call — no personal data (hostname, IP, username) is embedded.
-
-You can override this:
-
-```python
-ess = ESS(user_id="my-registered-user-id")
-```
-
-or via the `PYESS_USER_ID` environment variable.
+Instead, `py-ess` ships a small pre-built index (`src/pyess/resources/rounds.json`) that was
+scraped once, offline, from the ESS Data Portal's own (undocumented) GraphQL backend — see
+[`scripts/build_rounds_index.py`](scripts/build_rounds_index.py) for the full, commented
+scraper. This data only changes when ESS publishes a new round or revises an existing datafile
+edition (a few times per year at most), so it's committed as a static resource rather than
+fetched at runtime — no live scraping happens when you import or use `py-ess`. Re-run the
+script and commit the updated `rounds.json` whenever a new round/edition ships.
 
 ## Development
 
