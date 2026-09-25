@@ -53,7 +53,7 @@ def test_attribute_access_raises_for_unknown_name():
     import pytest
 
     with pytest.raises(AttributeError):
-        codebook.definitely_not_a_variable
+        _ = codebook.definitely_not_a_variable
 
 
 def test_variable_has_round_membership():

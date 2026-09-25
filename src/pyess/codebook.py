@@ -12,13 +12,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass, field
+from collections.abc import Iterator
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 from bs4 import BeautifulSoup
+from bs4 import FeatureNotFound as _BS4FeatureNotFound
 
 try:
     from platformdirs import user_cache_dir
@@ -29,7 +30,7 @@ except ImportError:  # pragma: no cover
         base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~/.cache")
         return str(Path(base) / appname)
 
-from .models import Variable, ValueLabel, Round
+from .models import Round, ValueLabel, Variable
 
 _DOI_RE = re.compile(r"doi\.org/(?P<doi>10\.\d+/\S+)")
 _ROUND_LABEL_RE = re.compile(r"ess(?P<num>\d+)(?P<sc>sc)?e", re.IGNORECASE)
@@ -60,7 +61,7 @@ class Codebook:
     plain dict/JSON structures.
     """
 
-    def __init__(self, rounds: List[Round], variables: List[Variable]):
+    def __init__(self, rounds: list[Round], variables: list[Variable]):
         self._rounds = rounds
         self._variables = variables
         self._rounds_by_doi = {r.doi: r for r in rounds}
@@ -68,7 +69,7 @@ class Codebook:
 
     # -- construction ------------------------------------------------
     @classmethod
-    def from_html(cls, html: str, rounds_index: Optional[Dict[str, Any]] = None) -> "Codebook":
+    def from_html(cls, html: str, rounds_index: dict[str, Any] | None = None) -> Codebook:
         """Parse the codebook HTML (labels/question text/value labels) and
         optionally join it with a round index (see ``rounds.json``, built by
         ``scripts/build_rounds_index.py``) that records which rounds each
@@ -76,7 +77,7 @@ class Codebook:
         """
         try:
             soup = BeautifulSoup(html, "lxml")
-        except Exception:  # pragma: no cover - lxml not installed
+        except _BS4FeatureNotFound:  # pragma: no cover - lxml not installed
             soup = BeautifulSoup(html, "html.parser")
         parsed_rounds = _parse_datafiles(soup)
         variables = _parse_variables(soup)
@@ -94,7 +95,7 @@ class Codebook:
         return cls(parsed_rounds, variables)
 
     @classmethod
-    def load_bundled(cls) -> "Codebook":
+    def load_bundled(cls) -> Codebook:
         """Load the codebook shipped with the package: variable labels/question
         text/value labels from ``resources/codebook.html``, joined with the
         variable-to-round membership index from ``resources/rounds.json``
@@ -122,22 +123,22 @@ class Codebook:
 
     # -- indexing ------------------------------------------------------
     @property
-    def rounds(self) -> List[Round]:
+    def rounds(self) -> list[Round]:
         return list(self._rounds)
 
     @property
-    def datafiles(self) -> List[Round]:
+    def datafiles(self) -> list[Round]:
         # Backwards-compatible alias for `.rounds`.
         return self.rounds
 
     @property
-    def variables(self) -> List[Variable]:
+    def variables(self) -> list[Variable]:
         return list(self._variables)
 
     def __len__(self) -> int:
         return len(self._variables)
 
-    def __iter__(self) -> Iterable[Variable]:
+    def __iter__(self) -> Iterator[Variable]:
         return iter(self._variables)
 
     def __getitem__(self, variable_id: str) -> Variable:
@@ -146,10 +147,10 @@ class Codebook:
     def __contains__(self, variable_id: str) -> bool:
         return variable_id in self._variables_by_id
 
-    def get_variable(self, variable_id: str) -> Optional[Variable]:
+    def get_variable(self, variable_id: str) -> Variable | None:
         return self._variables_by_id.get(variable_id)
 
-    def variables_in_round(self, round_: str) -> List[Variable]:
+    def variables_in_round(self, round_: str) -> list[Variable]:
         """All variables collected in a given round, identified by DOI or by
         short label (e.g. ``"ESS11"``, case-insensitive)."""
         doi = self._resolve_round_doi(round_)
@@ -168,12 +169,12 @@ class Codebook:
             f"(no such variable either; use codebook[{name!r}] to check safely)"
         )
 
-    def __dir__(self) -> List[str]:
+    def __dir__(self) -> list[str]:
         return list(super().__dir__()) + [
             v for v in self._variables_by_id if v.isidentifier()
         ]
 
-    def find_datafile(self, name_substring: str) -> Optional[Round]:
+    def find_datafile(self, name_substring: str) -> Round | None:
         """Find the first round whose name contains ``name_substring``
         (case-insensitive)."""
         needle = name_substring.lower()
@@ -182,10 +183,10 @@ class Codebook:
                 return d
         return None
 
-    def get_datafile(self, doi: str) -> Optional[Round]:
+    def get_datafile(self, doi: str) -> Round | None:
         return self._rounds_by_doi.get(doi)
 
-    def get_round(self, round_: str) -> Optional[Round]:
+    def get_round(self, round_: str) -> Round | None:
         """Look up a round by DOI or short label (e.g. ``"ESS11"``)."""
         if round_ in self._rounds_by_doi:
             return self._rounds_by_doi[round_]
@@ -202,14 +203,14 @@ class Codebook:
         return round_obj.doi
 
     # -- serialization ---------------------------------------------------
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "rounds": [r.to_dict() for r in self._rounds],
             "variables": {v.id: v.to_dict() for v in self._variables},
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Codebook":
+    def from_dict(cls, data: dict[str, Any]) -> Codebook:
         rounds_data = data.get("rounds", data.get("datafiles", []))
         rounds = [
             Round(doi=r["doi"], name=r["name"], countries=list(r.get("countries", [])))
@@ -228,8 +229,8 @@ class Codebook:
         return cls(rounds, variables)
 
 
-def _parse_datafiles(soup: BeautifulSoup) -> List[Datafile]:
-    datafiles: List[Datafile] = []
+def _parse_datafiles(soup: BeautifulSoup) -> list[Datafile]:
+    datafiles: list[Datafile] = []
     datafiles_heading = soup.find("h2", string=re.compile(r"^\s*Datafiles\s*$"))
     if datafiles_heading is None:
         return datafiles
@@ -252,8 +253,8 @@ def _parse_datafiles(soup: BeautifulSoup) -> List[Datafile]:
     return datafiles
 
 
-def _parse_variables(soup: BeautifulSoup) -> List[Variable]:
-    variables: List[Variable] = []
+def _parse_variables(soup: BeautifulSoup) -> list[Variable]:
+    variables: list[Variable] = []
     for header in soup.find_all("h3", id=True):
         container = header.parent  # the wrapping <div> for this variable
         if container is None:
@@ -263,13 +264,13 @@ def _parse_variables(soup: BeautifulSoup) -> List[Variable]:
         label_div = header.find_next_sibling("div")
         label = label_div.get_text(strip=True) if label_div else ""
 
-        question_texts: List[str] = []
+        question_texts: list[str] = []
         for meta in container.find_all("div", class_="variable-meta-string"):
             text = meta.get_text(strip=True)
             if text:
                 question_texts.append(text)
 
-        value_labels: List[ValueLabel] = []
+        value_labels: list[ValueLabel] = []
         data_table = container.find("div", class_="data-table")
         if data_table is not None:
             body = data_table.find("tbody")
@@ -302,7 +303,7 @@ def load_bundled_codebook() -> Codebook:
 
 
 @lru_cache(maxsize=1)
-def _load_bundled_rounds_index() -> Optional[Dict[str, Any]]:
+def _load_bundled_rounds_index() -> dict[str, Any] | None:
     """Load the pre-scraped variable-to-round membership index
     (``resources/rounds.json``), built offline by
     ``scripts/build_rounds_index.py``. Returns ``None`` if the resource is
@@ -320,12 +321,12 @@ def _load_bundled_rounds_index() -> Optional[Dict[str, Any]]:
 
 
 def _rounds_and_membership_from_index(
-    rounds_index: Dict[str, Any]
-) -> "tuple[List[Round], Dict[str, List[str]]]":
+    rounds_index: dict[str, Any]
+) -> tuple[list[Round], dict[str, list[str]]]:
     """Turn the raw rounds.json structure into ``Round`` objects plus a
     variable id -> list-of-round-DOIs membership mapping."""
-    rounds: List[Round] = []
-    variable_rounds: Dict[str, List[str]] = {}
+    rounds: list[Round] = []
+    variable_rounds: dict[str, list[str]] = {}
     for entry in rounds_index.get("rounds", []):
         doi = entry["doi"]
         rounds.append(Round(doi=doi, name=entry["name"], countries=list(entry.get("countries", []))))
@@ -339,7 +340,7 @@ def _disk_cache_path(cache_key: str) -> Path:
     return Path(user_cache_dir("py-ess")) / f"codebook-{digest}.json"
 
 
-def _load_from_disk_cache(cache_key: str) -> Optional[Codebook]:
+def _load_from_disk_cache(cache_key: str) -> Codebook | None:
     path = _disk_cache_path(cache_key)
     if not path.exists():
         return None

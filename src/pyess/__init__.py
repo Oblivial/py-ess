@@ -16,17 +16,17 @@ Typical usage::
 from .client import ESS
 from .codebook import Codebook, Datafile, Round
 from .dataset import Dataset
-from .models import Variable, ValueLabel
+from .models import ValueLabel, Variable
 from .userid import get_user_id
 
 __all__ = [
     "ESS",
     "Codebook",
     "Datafile",
-    "Round",
     "Dataset",
-    "Variable",
+    "Round",
     "ValueLabel",
+    "Variable",
     "get_user_id",
 ]
 

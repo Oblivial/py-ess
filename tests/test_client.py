@@ -38,7 +38,7 @@ def test_load_downloads_and_caches(tmp_path, sample_parquet_bytes):
     assert dataset.cntry.values == dataset["cntry"].values
     assert dataset.idno.values == [1, 2]
     with pytest.raises(AttributeError):
-        dataset.not_a_real_column
+        _ = dataset.not_a_real_column
     # Real attributes/methods always take precedence over columns.
     assert dataset.columns == ["idno", "cntry"]
 

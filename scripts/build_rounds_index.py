@@ -29,7 +29,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 
@@ -39,7 +39,7 @@ AGENCY_ID = "INT_ESSERIC"
 # The full list of ESS integrated datafile DOIs, taken from the ESS API's
 # bundled "Datafile codebook" (https://api.ess.sikt.no/docs -> Datafile
 # codebook.html). Update this list whenever a new round/edition is released.
-DATAFILE_DOIS: List[Dict[str, str]] = [
+DATAFILE_DOIS: list[dict[str, str]] = [
     {"doi": "10.21338/ess1e06_7", "name": "ESS1 - integrated file, edition 6.7"},
     {"doi": "10.21338/ess2e03_6", "name": "ESS2 - integrated file, edition 3.6 (Italy not included)"},
     {"doi": "10.21338/ess3e03_7", "name": "ESS3 - integrated file, edition 3.7 (Latvia and Romania not included)"},
@@ -98,7 +98,7 @@ query datafileVariablesAndGroups($id: ID!, $version: Int, $instance: Instance!) 
 """
 
 
-def gql(query: str, variables: Dict[str, Any]) -> Dict[str, Any]:
+def gql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     response = requests.post(GRAPHQL_URL, json={"query": query, "variables": variables}, timeout=60)
     response.raise_for_status()
     payload = response.json()
@@ -117,10 +117,10 @@ def resolve_datafile_id(doi: str) -> str:
     return match.group(1)
 
 
-def _flatten_variables(groups: Optional[List[Dict[str, Any]]]) -> List[Dict[str, str]]:
+def _flatten_variables(groups: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     """Recursively flatten the (arbitrarily nested) variableGroups tree into a
     flat list of {name, label} dicts."""
-    variables: List[Dict[str, str]] = []
+    variables: list[dict[str, str]] = []
     for group in groups or []:
         for var in group.get("variables") or []:
             name = (var.get("name") or {}).get("en")
@@ -131,7 +131,7 @@ def _flatten_variables(groups: Optional[List[Dict[str, Any]]]) -> List[Dict[str,
     return variables
 
 
-def fetch_round(doi: str, name: str) -> Dict[str, Any]:
+def fetch_round(doi: str, name: str) -> dict[str, Any]:
     datafile_id = resolve_datafile_id(doi)
 
     metadata = gql(_METADATA_QUERY, {"id": datafile_id, "instance": "PUBLISHED"})
@@ -164,7 +164,7 @@ def fetch_round(doi: str, name: str) -> Dict[str, Any]:
 
 
 def main() -> None:
-    rounds: List[Dict[str, Any]] = []
+    rounds: list[dict[str, Any]] = []
     for entry in DATAFILE_DOIS:
         print(f"Fetching {entry['name']} ({entry['doi']})...")
         round_data = fetch_round(entry["doi"], entry["name"])

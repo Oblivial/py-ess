@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -13,7 +13,7 @@ class ValueLabel:
     value: str
     label: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -26,7 +26,7 @@ class Round:
 
     doi: str
     name: str
-    countries: List[str] = field(default_factory=list)
+    countries: list[str] = field(default_factory=list)
 
     @property
     def doi_prefix(self) -> str:
@@ -36,7 +36,7 @@ class Round:
     def doi_suffix(self) -> str:
         return self.doi.split("/", 1)[1]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"doi": self.doi, "name": self.name, "countries": list(self.countries)}
 
 
@@ -54,11 +54,11 @@ class Variable:
 
     id: str
     label: str
-    question_texts: List[str] = field(default_factory=list)
-    value_labels: List[ValueLabel] = field(default_factory=list)
-    rounds: List[str] = field(default_factory=list)  # DOIs of rounds containing this variable
+    question_texts: list[str] = field(default_factory=list)
+    value_labels: list[ValueLabel] = field(default_factory=list)
+    rounds: list[str] = field(default_factory=list)  # DOIs of rounds containing this variable
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "label": self.label,
@@ -67,7 +67,7 @@ class Variable:
             "rounds": list(self.rounds),
         }
 
-    def label_for(self, value: Any) -> Optional[str]:
+    def label_for(self, value: Any) -> str | None:
         """Look up the human-readable category label for a coded value."""
         value_str = str(value)
         for vl in self.value_labels:

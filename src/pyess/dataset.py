@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Iterator, List, Optional
+from collections.abc import Iterator
+from typing import Any
 
 import pandas as pd
 
@@ -17,7 +18,7 @@ class SeriesView:
     values (as records), and indexing by row position.
     """
 
-    def __init__(self, name: str, series: "pd.Series", variable: Optional[Variable]):
+    def __init__(self, name: str, series: pd.Series, variable: Variable | None):
         self._name = name
         self._series = series
         self._variable = variable
@@ -27,11 +28,11 @@ class SeriesView:
         return self._name
 
     @property
-    def variable(self) -> Optional[Variable]:
+    def variable(self) -> Variable | None:
         return self._variable
 
     @property
-    def values(self) -> List[Any]:
+    def values(self) -> list[Any]:
         return self._series.tolist()
 
     def __len__(self) -> int:
@@ -43,7 +44,7 @@ class SeriesView:
     def __iter__(self) -> Iterator[Any]:
         return iter(self._series.tolist())
 
-    def decoded(self) -> List[Any]:
+    def decoded(self) -> list[Any]:
         """Return values with coded numbers/strings replaced by their
         human-readable category label, where a mapping exists."""
         if self._variable is None or not self._variable.value_labels:
@@ -53,7 +54,7 @@ class SeriesView:
             for v in self._series.tolist()
         ]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self._name,
             "variable": self._variable.to_dict() if self._variable else None,
@@ -76,25 +77,25 @@ class Dataset:
 
     def __init__(
         self,
-        dataframe: "pd.DataFrame",
-        datafile: Optional[Datafile] = None,
-        codebook: Optional[Codebook] = None,
+        dataframe: pd.DataFrame,
+        datafile: Datafile | None = None,
+        codebook: Codebook | None = None,
     ):
         self._df = dataframe
         self._datafile = datafile
         self._codebook = codebook
 
     @property
-    def dataframe(self) -> "pd.DataFrame":
+    def dataframe(self) -> pd.DataFrame:
         """Escape hatch to the underlying pandas DataFrame."""
         return self._df
 
     @property
-    def datafile(self) -> Optional[Datafile]:
+    def datafile(self) -> Datafile | None:
         return self._datafile
 
     @property
-    def columns(self) -> List[str]:
+    def columns(self) -> list[str]:
         return list(self._df.columns)
 
     def __len__(self) -> int:
@@ -125,7 +126,7 @@ class Dataset:
             f"(no such column either; use dataset[{name!r}] to check safely)"
         )
 
-    def __dir__(self) -> List[str]:
+    def __dir__(self) -> list[str]:
         # Enables tab-completion for column names in IDEs/notebooks.
         return list(super().__dir__()) + [
             c for c in self.columns if c.isidentifier()
@@ -135,15 +136,15 @@ class Dataset:
         variable = self._codebook.get_variable(column) if self._codebook else None
         return SeriesView(column, self._df[column], variable)
 
-    def variable(self, column: str) -> Optional[Variable]:
+    def variable(self, column: str) -> Variable | None:
         return self._codebook.get_variable(column) if self._codebook else None
 
-    def to_records(self) -> List[Dict[str, Any]]:
+    def to_records(self) -> list[dict[str, Any]]:
         """Return the dataset as a list of per-row dicts (JSON-serializable)."""
         return self._df.to_dict(orient="records")
 
-    def to_dict(self, include_metadata: bool = True) -> Dict[str, Any]:
-        result: Dict[str, Any] = {
+    def to_dict(self, include_metadata: bool = True) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "datafile": self._datafile.to_dict() if self._datafile else None,
             "columns": self.columns,
             "row_count": len(self._df),

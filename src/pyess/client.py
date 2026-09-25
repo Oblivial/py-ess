@@ -6,7 +6,7 @@ import io
 import logging
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 import requests
@@ -59,18 +59,18 @@ class ESS:
 
     def __init__(
         self,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         base_url: str = _DEFAULT_BASE_URL,
-        cache_dir: Optional[Path] = None,
+        cache_dir: Path | None = None,
         use_cache: bool = True,
-        session: Optional[requests.Session] = None,
+        session: requests.Session | None = None,
     ):
         self.user_id = user_id or get_user_id()
         self.base_url = base_url.rstrip("/")
         self.use_cache = use_cache
         self.cache_dir = Path(cache_dir) if cache_dir else Path(user_cache_dir("py-ess"))
         self.session = session or requests.Session()
-        self._codebook: Optional[Codebook] = None
+        self._codebook: Codebook | None = None
 
     # -- codebook (static metadata) --------------------------------------
     @property
@@ -135,9 +135,9 @@ class ESS:
     def load_variable(
         self,
         variable: str,
-        round_: Optional[str] = None,
+        round_: str | None = None,
         **kwargs: Any,
-    ) -> "SeriesView":
+    ) -> SeriesView:
         """Load a single variable's data, indexed purely by name (and,
         optionally, round) - without the caller ever having to look up a
         datafile/DOI themselves.
@@ -204,7 +204,7 @@ def _split_doi(doi: str) -> tuple[str, str]:
     return prefix, suffix
 
 
-def _parse_content(content: bytes, file_format: str) -> "pd.DataFrame":
+def _parse_content(content: bytes, file_format: str) -> pd.DataFrame:
     if file_format == "parquet":
         return pd.read_parquet(io.BytesIO(content))
     if file_format == "csv":

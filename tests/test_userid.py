@@ -1,6 +1,4 @@
-import os
 
-import pytest
 
 from pyess.userid import get_user_id
 
