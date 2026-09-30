@@ -24,6 +24,15 @@ def test_empty_constructor_without_user_id(monkeypatch):
         ESS()
 
 
+def test_live_api_loads_real_ess_data(tmp_path):
+    ess = ESS(user_id=configured_user_id(), cache_dir=tmp_path, use_cache=False)
+
+    dataset = ess.load("10.21338/ess2e03_6")
+
+    assert len(dataset) > 0
+    assert "idno" in dataset
+
+
 @pytest.fixture
 def sample_parquet_bytes():
     df = pd.DataFrame({"idno": [1, 2], "cntry": ["DE", "FR"]})
