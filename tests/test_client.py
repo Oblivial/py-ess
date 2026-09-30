@@ -31,6 +31,7 @@ def test_live_api_loads_real_ess_data(tmp_path):
 
     assert len(dataset) > 0
     assert "idno" in dataset
+    assert dataset["cntry"][0] == "AT"
 
 
 @pytest.fixture
