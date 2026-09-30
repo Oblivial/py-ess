@@ -9,7 +9,8 @@ indexable, self-describing, JSON-serializable Python objects.
 ```python
 from pyess import ESS
 
-ess = ESS()
+# Get your ESS user ID at https://ess.sikt.no/en/api after logging in.
+ess = ESS(user_id="your-ess-user-id")
 
 # Look up a variable and see which ESS rounds it was collected in
 variable = ess.codebook["netusoft"]
@@ -42,6 +43,24 @@ For local development (editable install, e.g. from a clone of this repo):
 git clone https://github.com/Oblivial/py-ess.git
 cd py-ess
 pip install -e ".[dev]"
+```
+
+Development and client tests require a real ESS user ID. Get it by logging in
+at [`https://ess.sikt.no/en/api`](https://ess.sikt.no/en/api), copy
+`.env.example` to `.env`, and put your ID in the local `.env` file:
+
+```powershell
+Copy-Item .env.example .env
+# Edit .env and replace the placeholder with your ESS user ID.
+pytest -q
+```
+
+The test configuration loads `.env` automatically, and `.env` is ignored by
+Git. You can also configure the variable directly in PowerShell:
+
+```powershell
+$env:PYESS_USER_ID = "your-ess-user-id"
+pytest -q
 ```
 
 ## Guide
@@ -77,6 +96,25 @@ dataset[0]                   # first respondent as a dict
 
 You can also load by DOI directly if you already have one: `ess.load("10.21338/ess11e04_2")`.
 
+### Loading a local ESS CSV
+
+Local ESS CSV files can be loaded without an API request. The bundled codebook
+is still used to provide variable labels and decoded value labels:
+
+```python
+dataset = ess.load_local_csv(
+  "path/to/ess11.csv",
+  variables=["cntry", "stfeco"],
+)
+
+dataset["stfeco"].decoded()
+```
+
+The optional `variables` argument checks that the requested columns are present
+and raises an error listing the available columns when the wrong ESS file is
+supplied. Without that argument, accessing a missing variable produces the
+same explanatory error.
+
 ### `[]` vs. `.` access
 
 Both `dataset["cntry"]` and `dataset.cntry` (likewise `codebook["cntry"]` / `codebook.cntry`)
@@ -107,19 +145,26 @@ designated missing values (e.g. "Not applicable") to system missing values.
 
 ### The `userId` parameter
 
-The ESS API requires a `userId` query parameter on every request. Per the API docs,
-this is used only for usage statistics, not authentication. `py-ess` follows common
-SDK practice (similar to npm/pip telemetry client IDs): it generates a random,
-anonymous `py-ess-<uuid4>` identifier once, caches it in your user config directory,
-and reuses it on every call — no personal data (hostname, IP, username) is embedded.
+The ESS API requires a registered ESS user ID on every data request. It is used
+for usage statistics rather than authentication, but an arbitrary UUID or a
+locally generated ID is not accepted. Get your ID by logging in at
+[`https://ess.sikt.no/en/api`](https://ess.sikt.no/en/api).
 
-You can override this:
+Pass it directly:
 
 ```python
-ess = ESS(user_id="my-registered-user-id")
+ess = ESS(user_id="your-ess-user-id")
 ```
 
-or via the `PYESS_USER_ID` environment variable.
+Or configure it through the `PYESS_USER_ID` environment variable:
+
+```powershell
+$env:PYESS_USER_ID = "your-ess-user-id"
+```
+
+`ESS()` without a configured ID raises a helpful error instead of making a
+request that the API will reject. `load_local_csv()` does not need an ID because
+it reads only from disk.
 
 ## Features
 
@@ -135,8 +180,8 @@ or via the `PYESS_USER_ID` environment variable.
 - **Round discovery** — `codebook.get_round("ESS11")` / `codebook.variables_in_round("ESS11")`,
   including which countries participated, without manually looking up DOIs from the docs.
 - **Multiple wire formats** — `parquet` (default), `csv`, `sav` (SPSS), `dta` (Stata).
-- **No forced registration** — a stable, anonymous `py-ess-<uuid4>` identifier is used
-  for the mandatory (non-authenticating) `userId` API parameter, unless you provide your own.
+- **Explicit API identity** — API requests use the registered ESS user ID from
+  the ESS portal; local CSV loading works without an API identity.
 
 ## Why not just use `pd.read_parquet(url)`?
 

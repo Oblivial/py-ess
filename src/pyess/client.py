@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -40,10 +41,9 @@ class ESS:
     Parameters
     ----------
     user_id:
-        Value to send as the ``userId`` query parameter. If omitted, a
-        stable anonymous identifier of the form ``py-ess-<uuid4>`` is
-        generated (or read from the ``PYESS_USER_ID`` env var / cache).
-        See :func:`pyess.userid.get_user_id`.
+        Registered ESS user ID to send as the ``userId`` query parameter. If
+        omitted, ``PYESS_USER_ID`` must be set. Get an ID at
+        ``https://ess.sikt.no/en/api``.
     base_url:
         Override the API base URL (mainly for testing).
     cache_dir:
@@ -71,6 +71,27 @@ class ESS:
         self.cache_dir = Path(cache_dir) if cache_dir else Path(user_cache_dir("py-ess"))
         self.session = session or requests.Session()
         self._codebook: Codebook | None = None
+
+    def load_local_csv(
+        self,
+        path: str | Path,
+        variables: Iterable[str] | None = None,
+    ) -> Dataset:
+        """Load an ESS CSV file from disk and attach bundled metadata.
+
+        If ``variables`` is supplied, every requested variable must be a
+        column in the file. A clear error lists missing and available columns
+        instead of failing later during variable access.
+        """
+        dataframe = pd.read_csv(path)
+        requested = list(dict.fromkeys(variables or []))
+        missing = [variable for variable in requested if variable not in dataframe]
+        if missing:
+            raise KeyError(
+                f"ESS CSV {str(path)!r} is missing variable(s): {', '.join(missing)}. "
+                f"Available columns: {', '.join(map(str, dataframe.columns))}"
+            )
+        return Dataset(dataframe, codebook=self.codebook)
 
     # -- codebook (static metadata) --------------------------------------
     @property

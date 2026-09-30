@@ -1,10 +1,27 @@
 import io
+import os
 
 import pandas as pd
 import pytest
 import responses
 
 from pyess.client import ESS, ESSAPIError
+
+
+def configured_user_id():
+    user_id = os.environ.get("PYESS_USER_ID")
+    if not user_id:
+        pytest.fail(
+            "Set PYESS_USER_ID to your ESS user ID before running client tests. "
+            "Get it at https://ess.sikt.no/en/api."
+        )
+    return user_id
+
+
+def test_empty_constructor_without_user_id(monkeypatch):
+    monkeypatch.delenv("PYESS_USER_ID", raising=False)
+    with pytest.raises(ValueError, match=r"https://ess\.sikt\.no/en/api"):
+        ESS()
 
 
 @pytest.fixture
@@ -25,7 +42,7 @@ def test_load_downloads_and_caches(tmp_path, sample_parquet_bytes):
         content_type="application/octet-stream",
     )
 
-    ess = ESS(user_id="py-ess-test", cache_dir=tmp_path)
+    ess = ESS(user_id=configured_user_id(), cache_dir=tmp_path)
     dataset = ess.load("10.21338/ess11e04_2")
 
     assert len(dataset) == 2
@@ -59,13 +76,13 @@ def test_load_raises_on_error(tmp_path):
         json={"code": 201, "message": "DOI URL resolution error", "requestId": "abc"},
         status=400,
     )
-    ess = ESS(user_id="py-ess-test", cache_dir=tmp_path, use_cache=False)
+    ess = ESS(user_id=configured_user_id(), cache_dir=tmp_path, use_cache=False)
     with pytest.raises(ESSAPIError, match="DOI URL resolution error"):
         ess.load("10.21338/bogus")
 
 
 def test_invalid_doi_raises_value_error(tmp_path):
-    ess = ESS(user_id="py-ess-test", cache_dir=tmp_path)
+    ess = ESS(user_id=configured_user_id(), cache_dir=tmp_path)
     with pytest.raises(ValueError):
         ess.load("not-a-doi")
 
@@ -79,7 +96,7 @@ def test_load_round_by_label(tmp_path, sample_parquet_bytes):
         status=200,
         content_type="application/octet-stream",
     )
-    ess = ESS(user_id="py-ess-test", cache_dir=tmp_path)
+    ess = ESS(user_id=configured_user_id(), cache_dir=tmp_path)
     dataset = ess.load_round("ESS11")
     assert dataset.columns == ["idno", "cntry"]
     assert dataset.datafile.doi == "10.21338/ess11e04_2"
@@ -94,7 +111,7 @@ def test_load_variable_by_name_and_round(tmp_path, sample_parquet_bytes):
         status=200,
         content_type="application/octet-stream",
     )
-    ess = ESS(user_id="py-ess-test", cache_dir=tmp_path)
+    ess = ESS(user_id=configured_user_id(), cache_dir=tmp_path)
     series = ess.load_variable("cntry", round_="ESS11")
     assert series.values == ["DE", "FR"]
     assert series.decoded() == ["Germany", "France"]
@@ -116,7 +133,7 @@ def test_dataset_to_dict_includes_variable_metadata(tmp_path, sample_parquet_byt
             body=sample_parquet_bytes,
             status=200,
         )
-        ess = ESS(user_id="py-ess-test", cache_dir=tmp_path)
+        ess = ESS(user_id=configured_user_id(), cache_dir=tmp_path)
         dataset = ess.load("10.21338/ess11e04_2")
 
     data = dataset.to_dict()
@@ -125,3 +142,24 @@ def test_dataset_to_dict_includes_variable_metadata(tmp_path, sample_parquet_byt
         {"idno": 1, "cntry": "DE"},
         {"idno": 2, "cntry": "FR"},
     ]
+
+
+def test_load_local_csv_validates_requested_variables(tmp_path):
+    csv_path = tmp_path / "ess.csv"
+    csv_path.write_text("idno,cntry\n1,DE\n", encoding="utf-8")
+    ess = ESS(user_id=configured_user_id())
+
+    dataset = ess.load_local_csv(csv_path, variables=["cntry"])
+
+    assert dataset["cntry"].values == ["DE"]
+    with pytest.raises(KeyError, match="stfeco.*Available columns: idno, cntry"):
+        ess.load_local_csv(csv_path, variables=["stfeco"])
+
+
+def test_dataset_missing_variable_lists_available_columns(tmp_path):
+    csv_path = tmp_path / "ess.csv"
+    csv_path.write_text("idno,cntry\n1,DE\n", encoding="utf-8")
+    dataset = ESS(user_id=configured_user_id()).load_local_csv(csv_path)
+
+    with pytest.raises(KeyError, match="stfeco.*Available columns: idno, cntry"):
+        dataset["stfeco"]

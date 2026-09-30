@@ -133,6 +133,11 @@ class Dataset:
         ]
 
     def _series_view(self, column: str) -> SeriesView:
+        if column not in self._df.columns:
+            raise KeyError(
+                f"Variable {column!r} is not present in this ESS datafile. "
+                f"Available columns: {', '.join(map(str, self._df.columns))}"
+            )
         variable = self._codebook.get_variable(column) if self._codebook else None
         return SeriesView(column, self._df[column], variable)
 
