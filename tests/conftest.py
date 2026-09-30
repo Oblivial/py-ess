@@ -1,9 +1,14 @@
 import os
 from pathlib import Path
+import sys
+
+
+ROOT = Path(__file__).parents[1]
+sys.path.insert(0, str(ROOT / "src"))
 
 
 def _load_local_env() -> None:
-    env_path = Path(__file__).parents[1] / ".env"
+    env_path = ROOT / ".env"
     if not env_path.exists():
         return
 
