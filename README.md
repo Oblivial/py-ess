@@ -102,6 +102,10 @@ You can also load by DOI directly if you already have one: `ess.load("10.21338/e
 Local ESS CSV files can be loaded without an API request. The bundled codebook
 is still used to provide variable labels and decoded value labels:
 
+For workflows that need to process large amounts of data in bulk, loading
+directly from a local file can improve performance by avoiding repeated
+downloads or API requests.
+
 ```python
 dataset = ess.load_local_csv(
   "path/to/ess11.csv",
@@ -110,6 +114,21 @@ dataset = ess.load_local_csv(
 
 dataset["stfeco"].decoded()
 ```
+
+Pandas is used by default. To use Polars instead, install the optional extra
+and select it when loading the local CSV:
+
+```bash
+pip install "py-ess[polars]"
+```
+
+```python
+dataset = ess.load_local_csv("path/to/ess11.csv", engine="polars")
+polars_frame = dataset.dataframe
+```
+
+The `Dataset` indexing and export methods work with either backend; the
+`dataframe` property returns the selected backend's native dataframe.
 
 The optional `variables` argument checks that the requested columns are present
 and raises an error listing the available columns when the wrong ESS file is
@@ -238,5 +257,3 @@ python scripts/build_codebook_json.py
 pip install -e ".[dev]"
 pytest
 ```
-
-

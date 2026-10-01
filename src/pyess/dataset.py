@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-import pandas as pd
-
 from .codebook import Codebook, Datafile
 from .models import Variable
 
@@ -18,7 +16,7 @@ class SeriesView:
     values (as records), and indexing by row position.
     """
 
-    def __init__(self, name: str, series: pd.Series, variable: Variable | None):
+    def __init__(self, name: str, series: Any, variable: Variable | None):
         self._name = name
         self._series = series
         self._variable = variable
@@ -33,16 +31,18 @@ class SeriesView:
 
     @property
     def values(self) -> list[Any]:
-        return self._series.tolist()
+        return _series_to_list(self._series)
 
     def __len__(self) -> int:
         return len(self._series)
 
     def __getitem__(self, index: int) -> Any:
-        return self._series.iloc[index]
+        if hasattr(self._series, "iloc"):
+            return self._series.iloc[index]
+        return self._series[index]
 
     def __iter__(self) -> Iterator[Any]:
-        return iter(self._series.tolist())
+        return iter(self.values)
 
     def decoded(self) -> list[Any]:
         """Return values with coded numbers/strings replaced by their
@@ -51,7 +51,7 @@ class SeriesView:
             return self.values
         return [
             self._variable.label_for(v) if self._variable.label_for(v) is not None else v
-            for v in self._series.tolist()
+            for v in self.values
         ]
 
     def to_dict(self) -> dict[str, Any]:
@@ -65,7 +65,7 @@ class SeriesView:
 class Dataset:
     """A downloaded ESS datafile, indexable by variable name and row.
 
-    Wraps a :class:`pandas.DataFrame` (the raw data) together with the
+    Wraps a pandas or Polars dataframe (the raw data) together with the
     matching :class:`~pyess.codebook.Codebook` metadata, exposing a
     dict/JSON-like interface without requiring pandas knowledge:
 
@@ -77,7 +77,7 @@ class Dataset:
 
     def __init__(
         self,
-        dataframe: pd.DataFrame,
+        dataframe: Any,
         datafile: Datafile | None = None,
         codebook: Codebook | None = None,
     ):
@@ -86,8 +86,8 @@ class Dataset:
         self._codebook = codebook
 
     @property
-    def dataframe(self) -> pd.DataFrame:
-        """Escape hatch to the underlying pandas DataFrame."""
+    def dataframe(self) -> Any:
+        """Escape hatch to the underlying pandas or Polars dataframe."""
         return self._df
 
     @property
@@ -111,7 +111,9 @@ class Dataset:
         if isinstance(key, str):
             return self._series_view(key)
         if isinstance(key, int):
-            return self._df.iloc[key].to_dict()
+            if hasattr(self._df, "iloc"):
+                return self._df.iloc[key].to_dict()
+            return self._df.row(key, named=True)
         raise TypeError(f"Unsupported index type for Dataset: {type(key)!r}")
 
     def __getattr__(self, name: str) -> Any:
@@ -146,6 +148,8 @@ class Dataset:
 
     def to_records(self) -> list[dict[str, Any]]:
         """Return the dataset as a list of per-row dicts (JSON-serializable)."""
+        if hasattr(self._df, "to_dicts"):
+            return self._df.to_dicts()
         return self._df.to_dict(orient="records")
 
     def to_dict(self, include_metadata: bool = True) -> dict[str, Any]:
@@ -162,3 +166,9 @@ class Dataset:
                 if (v := self._codebook.get_variable(col)) is not None
             }
         return result
+
+
+def _series_to_list(series: Any) -> list[Any]:
+    if hasattr(series, "tolist"):
+        return series.tolist()
+    return series.to_list()

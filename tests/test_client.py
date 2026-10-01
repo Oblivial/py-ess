@@ -166,6 +166,36 @@ def test_load_local_csv_validates_requested_variables(tmp_path):
         ess.load_local_csv(csv_path, variables=["stfeco"])
 
 
+def test_load_local_csv_with_polars(tmp_path):
+    pl = pytest.importorskip("polars")
+    csv_path = tmp_path / "ess.csv"
+    csv_path.write_text("idno,cntry\n1,DE\n2,FR\n", encoding="utf-8")
+    ess = ESS(user_id=configured_user_id())
+
+    dataset = ess.load_local_csv(csv_path, variables=["cntry"], engine="polars")
+
+    assert isinstance(dataset.dataframe, pl.DataFrame)
+    assert dataset.columns == ["idno", "cntry"]
+    assert dataset["cntry"].values == ["DE", "FR"]
+    assert dataset["cntry"].decoded() == ["Germany", "France"]
+    assert dataset["cntry"][1] == "FR"
+    assert dataset[0] == {"idno": 1, "cntry": "DE"}
+    assert dataset[-1] == {"idno": 2, "cntry": "FR"}
+    assert dataset.to_records() == [
+        {"idno": 1, "cntry": "DE"},
+        {"idno": 2, "cntry": "FR"},
+    ]
+
+
+def test_load_local_csv_rejects_unknown_engine(tmp_path):
+    csv_path = tmp_path / "ess.csv"
+    csv_path.write_text("idno\n1\n", encoding="utf-8")
+    ess = ESS(user_id=configured_user_id())
+
+    with pytest.raises(ValueError, match="expected 'pandas' or 'polars'"):
+        ess.load_local_csv(csv_path, engine="other")
+
+
 def test_dataset_missing_variable_lists_available_columns(tmp_path):
     csv_path = tmp_path / "ess.csv"
     csv_path.write_text("idno,cntry\n1,DE\n", encoding="utf-8")

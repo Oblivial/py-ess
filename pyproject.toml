@@ -20,6 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+polars = ["polars>=1.0"]
 spss = ["pyreadstat>=1.2"]
 dev = ["pytest>=7.0", "responses>=0.23", "pyreadstat>=1.2"]
 
@@ -36,5 +37,4 @@ pyess = ["resources/*.json.gz"]
 # They stay in the git repo as source input for that build step.
 [tool.setuptools.exclude-package-data]
 pyess = ["resources/codebook.html", "resources/rounds.json"]
-
 

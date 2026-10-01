@@ -7,7 +7,7 @@ import logging
 import os
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 import requests
@@ -76,14 +76,30 @@ class ESS:
         self,
         path: str | Path,
         variables: Iterable[str] | None = None,
+        engine: Literal["pandas", "polars"] = "pandas",
     ) -> Dataset:
         """Load an ESS CSV file from disk and attach bundled metadata.
 
         If ``variables`` is supplied, every requested variable must be a
         column in the file. A clear error lists missing and available columns
-        instead of failing later during variable access.
+        instead of failing later during variable access. ``engine`` selects
+        the dataframe library; Polars must be installed separately.
         """
-        dataframe = pd.read_csv(path)
+        if engine == "pandas":
+            dataframe = pd.read_csv(path)
+        elif engine == "polars":
+            try:
+                import polars as pl
+            except ImportError as exc:
+                raise ImportError(
+                    "Polars support requires the optional dependency; "
+                    "install it with `pip install py-ess[polars]`."
+                ) from exc
+            dataframe = pl.read_csv(path)
+        else:
+            raise ValueError(
+                f"Unsupported engine {engine!r}; expected 'pandas' or 'polars'"
+            )
         requested = list(dict.fromkeys(variables or []))
         missing = [variable for variable in requested if variable not in dataframe]
         if missing:
