@@ -140,7 +140,9 @@ you're confident your file doesn't have such mixed-dtype columns.
 The optional `variables` argument checks that the requested columns are present
 and raises an error listing the available columns when the wrong ESS file is
 supplied. Without that argument, accessing a missing variable produces the
-same explanatory error.
+same explanatory error. When `variables` is supplied, missing-value recoding
+(see below) is also limited to just those columns, which is considerably
+faster than recoding every column in a full ESS datafile.
 
 ### `[]` vs. `.` access
 
@@ -167,8 +169,28 @@ json.dumps(dataset.to_dict())
 ### File formats
 
 `ess.load(...)` / `ess.load_round(...)` accept `file_format="parquet"` (default), `"csv"`,
-`"sav"` (SPSS), or `"dta"` (Stata), and `recode_missing_values=True` to ask the API to recode
-designated missing values (e.g. "Not applicable") to system missing values.
+`"sav"` (SPSS), or `"dta"` (Stata) - the wire format the datafile is downloaded in.
+
+### Missing-value recoding
+
+ESS codes don't-know/refused/no-answer/not-applicable-style responses as
+designated-missing values (e.g. `77`/`88`/`99` for a 0-10 scale), rather than
+leaving them blank. `recode_missing_values` (default `True` on both
+`ess.load(...)` and `ess.load_local_csv(...)`) recodes those to system
+missing (`NaN`/`null`) so they don't silently skew statistics computed over
+the raw column. Set it to `False` to get the original, undecoded codes back.
+
+The *mechanism* differs depending on where the data comes from, but the
+result is the same either way:
+
+- `ess.load(...)` / `ess.load_round(...)` / `ess.load_variable(...)`: the
+  flag is sent to the ESS API as `recodeMissingValues=true`, so recoding
+  happens server-side, before the file is even downloaded.
+- `ess.load_local_csv(...)`: there is no server to ask, since the file is
+  already on disk. Instead, py-ess recodes it locally, using the
+  designated-missing value codes recorded in the bundled codebook (parsed
+  from each variable's "*) Missing value"-flagged categories, e.g. "Refusal",
+  "Don't know", "No answer" - see `Variable.missing_values`).
 
 ### The `userId` parameter
 
@@ -207,6 +229,8 @@ it reads only from disk.
 - **Round discovery** — `codebook.get_round("ESS11")` / `codebook.variables_in_round("ESS11")`,
   including which countries participated, without manually looking up DOIs from the docs.
 - **Multiple wire formats** — `parquet` (default), `csv`, `sav` (SPSS), `dta` (Stata).
+- **Missing-value recoding on by default** — designated-missing codes (Refusal/Don't
+  know/No answer/etc.) are recoded to `NaN`/`null` for both API downloads and local CSVs.
 - **Explicit API identity** — API requests use the registered ESS user ID from
   the ESS portal; local CSV loading works without an API identity.
 

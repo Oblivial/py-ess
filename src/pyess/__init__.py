@@ -16,6 +16,7 @@ Typical usage::
 from .client import ESS
 from .codebook import Codebook, Datafile, Round
 from .dataset import Dataset
+from .missing_values import recode_missing_values
 from .models import ValueLabel, Variable
 from .userid import get_user_id
 
@@ -28,6 +29,7 @@ __all__ = [
     "ValueLabel",
     "Variable",
     "get_user_id",
+    "recode_missing_values",
 ]
 
 __version__ = "0.1.0b3"
