@@ -77,6 +77,7 @@ class ESS:
         path: str | Path,
         variables: Iterable[str] | None = None,
         engine: Literal["pandas", "polars"] = "pandas",
+        full_schema_scan: bool = True,
     ) -> Dataset:
         """Load an ESS CSV file from disk and attach bundled metadata.
 
@@ -84,6 +85,17 @@ class ESS:
         column in the file. A clear error lists missing and available columns
         instead of failing later during variable access. ``engine`` selects
         the dataframe library; Polars must be installed separately.
+
+        ``full_schema_scan`` only applies to ``engine="polars"``. Polars
+        normally infers each column's dtype from a small sample of rows,
+        which can misjudge mostly-integer ESS columns that contain the
+        occasional decimal value (e.g. ``wkhtot``) further down the file and
+        raise a parse error. When ``True`` (the default), the full file is
+        scanned for schema inference to avoid this, at the cost of extra read
+        time/memory on very large files. Set it to ``False`` to restore
+        Polars' default sampled inference (faster, but may hit the same
+        mixed-dtype parse errors on columns whose irregular values appear
+        beyond the sampled rows).
         """
         if engine == "pandas":
             dataframe = pd.read_csv(path)
@@ -95,7 +107,8 @@ class ESS:
                     "Polars support requires the optional dependency; "
                     "install it with `pip install py-ess[polars]`."
                 ) from exc
-            dataframe = pl.read_csv(path)
+            infer_schema_length = None if full_schema_scan else 100
+            dataframe = pl.read_csv(path, infer_schema_length=infer_schema_length)
         else:
             raise ValueError(
                 f"Unsupported engine {engine!r}; expected 'pandas' or 'polars'"

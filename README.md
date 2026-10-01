@@ -130,6 +130,13 @@ polars_frame = dataset.dataframe
 The `Dataset` indexing and export methods work with either backend; the
 `dataframe` property returns the selected backend's native dataframe.
 
+With `engine="polars"`, the full file is scanned to infer each column's dtype
+by default (`full_schema_scan=True`). This avoids parse errors on ESS columns
+that are mostly integers but contain an occasional decimal value further down
+the file (e.g. `wkhtot`), which Polars' default sampled inference can miss.
+Pass `full_schema_scan=False` to restore Polars' faster, sampled inference if
+you're confident your file doesn't have such mixed-dtype columns.
+
 The optional `variables` argument checks that the requested columns are present
 and raises an error listing the available columns when the wrong ESS file is
 supplied. Without that argument, accessing a missing variable produces the

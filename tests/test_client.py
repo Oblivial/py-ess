@@ -187,6 +187,26 @@ def test_load_local_csv_with_polars(tmp_path):
     ]
 
 
+def test_load_local_csv_polars_infers_schema_from_full_file(tmp_path):
+    """Regression test: a decimal value beyond Polars' sampled rows should
+    not raise a parse error when full_schema_scan is enabled (the default).
+    """
+    pytest.importorskip("polars")
+    csv_path = tmp_path / "ess.csv"
+    rows = ["idno,wkhtot"]
+    rows.extend(f"{i},40" for i in range(1, 200))
+    rows.append("200,8.5")
+    csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    ess = ESS(user_id=configured_user_id())
+
+    dataset = ess.load_local_csv(csv_path, engine="polars")
+
+    assert dataset["wkhtot"][-1] == 8.5
+
+    with pytest.raises(Exception):
+        ess.load_local_csv(csv_path, engine="polars", full_schema_scan=False)
+
+
 def test_load_local_csv_rejects_unknown_engine(tmp_path):
     csv_path = tmp_path / "ess.csv"
     csv_path.write_text("idno\n1\n", encoding="utf-8")
