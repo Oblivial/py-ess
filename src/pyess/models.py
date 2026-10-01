@@ -8,10 +8,19 @@ from typing import Any
 
 @dataclass
 class ValueLabel:
-    """A single value -> category label mapping for a coded variable."""
+    """A single value -> category label mapping for a coded variable.
+
+    ``is_missing`` reflects the codebook's own designated-missing marker: ESS
+    annotates categories such as "Refusal", "Don't know", or "No answer" with
+    a trailing ``*`` (and a "*) Missing value" footnote) in the published
+    codebook. ``Codebook.from_html`` strips that marker from ``label`` and
+    records it here instead, so it can be used programmatically (see
+    ``Variable.missing_values``) without re-parsing text.
+    """
 
     value: str
     label: str
+    is_missing: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -74,6 +83,13 @@ class Variable:
             if vl.value == value_str:
                 return vl.label
         return None
+
+    @property
+    def missing_values(self) -> set[str]:
+        """Raw value codes (as strings, e.g. ``{"77", "88", "99"}``) that the
+        codebook designates as missing (Refusal/Don't know/No answer/etc.)
+        for this variable. Empty if the variable has no such codes."""
+        return {vl.value for vl in self.value_labels if vl.is_missing}
 
     def in_round(self, doi: str) -> bool:
         """Whether this variable was collected in the round identified by ``doi``."""

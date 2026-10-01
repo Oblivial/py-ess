@@ -78,6 +78,7 @@ class ESS:
         variables: Iterable[str] | None = None,
         engine: Literal["pandas", "polars"] = "pandas",
         full_schema_scan: bool = True,
+        recode_missing_values: bool = True,
     ) -> Dataset:
         """Load an ESS CSV file from disk and attach bundled metadata.
 
@@ -96,6 +97,14 @@ class ESS:
         Polars' default sampled inference (faster, but may hit the same
         mixed-dtype parse errors on columns whose irregular values appear
         beyond the sampled rows).
+
+        ``recode_missing_values`` mirrors the ``recode_missing_values``
+        parameter of :meth:`load`, but there is no API to ask to do the work
+        for a file that's already on disk: instead, every column is recoded
+        locally using the designated-missing value codes (Refusal/Don't
+        know/No answer/etc.) recorded in the bundled codebook (see
+        ``Variable.missing_values``). Defaults to ``True`` so local CSVs and
+        API downloads behave the same way out of the box.
         """
         if engine == "pandas":
             dataframe = pd.read_csv(path)
@@ -120,6 +129,14 @@ class ESS:
                 f"ESS CSV {str(path)!r} is missing variable(s): {', '.join(missing)}. "
                 f"Available columns: {', '.join(map(str, dataframe.columns))}"
             )
+        if recode_missing_values:
+            # Only touch the columns actually requested, if any were: with
+            # hundreds of columns in a full ESS datafile, recoding every one
+            # of them is needlessly slow when the caller only cares about a
+            # handful of variables.
+            dataframe = _recode_missing_values_locally(
+                dataframe, self.codebook, columns=requested or None
+            )
         return Dataset(dataframe, codebook=self.codebook)
 
     # -- codebook (static metadata) --------------------------------------
@@ -135,7 +152,7 @@ class ESS:
         self,
         doi: str,
         file_format: str = "parquet",
-        recode_missing_values: bool = False,
+        recode_missing_values: bool = True,
         refresh: bool = False,
     ) -> Dataset:
         """Load a datafile by DOI, downloading (and caching) it on demand.
@@ -147,8 +164,14 @@ class ESS:
         file_format:
             One of ``"parquet"`` (default), ``"csv"``, ``"sav"``, ``"dta"``.
         recode_missing_values:
-            If ``True``, ask the API to recode designated missing values
-            (e.g. "Not applicable") to system missing values.
+            Defaults to ``True``. Asks the ESS API itself to recode
+            designated-missing values (e.g. "Refusal", "Don't know", "No
+            answer") to system missing values before the file is downloaded.
+            Set to ``False`` to receive the raw, undecoded value codes
+            instead. See ``load_local_csv`` for the equivalent behaviour
+            when loading a file that's already on disk, which has no API to
+            delegate to and instead recodes locally using the bundled
+            codebook.
         refresh:
             If ``True``, bypass the on-disk cache and re-download.
         """
@@ -274,6 +297,75 @@ def _parse_content(content: bytes, file_format: str) -> pd.DataFrame:
         finally:
             os.unlink(tmp_path)
     raise ValueError(f"Unsupported file_format {file_format!r}")  # pragma: no cover
+
+
+def _value_matchers(codes: set[str]) -> set[Any]:
+    """Expand codebook value codes (always strings, e.g. ``"77"``) into every
+    representation they might take once a CSV column has been parsed (int,
+    float, or left as the original string), so they can be matched against a
+    column regardless of the dtype pandas/Polars inferred for it."""
+    matchers: set[Any] = set(codes)
+    for code in codes:
+        try:
+            matchers.add(int(code))
+        except ValueError:
+            pass
+        try:
+            matchers.add(float(code))
+        except ValueError:
+            pass
+    return matchers
+
+
+def _recode_missing_values_locally(
+    dataframe: Any, codebook: Codebook, columns: Iterable[str] | None = None
+) -> Any:
+    """Recode ESS designated-missing value codes to system-missing (NaN/null)
+    for the given ``columns`` (every column in ``dataframe`` if omitted) that
+    the bundled codebook knows about.
+
+    This is the local-CSV equivalent of the ESS API's
+    ``recodeMissingValues=true`` parameter (see ``ESS._download``): there's no
+    server to ask, so the same designated-missing codes (Refusal/Don't
+    know/No answer/etc., parsed from the codebook's "*) Missing value"
+    footnotes) are applied directly to the already-downloaded dataframe.
+    """
+    is_polars = hasattr(dataframe, "with_columns")
+    target_columns = list(columns) if columns is not None else list(dataframe.columns)
+    for column in target_columns:
+        if column not in dataframe.columns:
+            continue
+        variable = codebook.get_variable(column)
+        if variable is None:
+            continue
+        missing_codes = variable.missing_values
+        if not missing_codes:
+            continue
+        if is_polars:
+            import polars as pl
+
+            numeric_codes = [float(c) for c in missing_codes if _is_number(c)]
+            col_dtype = dataframe.schema[column]
+            if numeric_codes and col_dtype.is_numeric():
+                condition = pl.col(column).cast(pl.Float64).is_in(numeric_codes)
+            else:
+                condition = pl.col(column).cast(pl.Utf8).is_in(list(missing_codes))
+            dataframe = dataframe.with_columns(
+                pl.when(condition).then(None).otherwise(pl.col(column)).alias(column)
+            )
+        else:
+            mask = dataframe[column].isin(_value_matchers(missing_codes))
+            if mask.any():
+                dataframe[column] = dataframe[column].mask(mask)
+    return dataframe
+
+
+def _is_number(value: str) -> bool:
+    try:
+        float(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _raise_for_error(response: requests.Response) -> None:

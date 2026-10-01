@@ -291,10 +291,19 @@ def _parse_variables(soup: BeautifulSoup) -> list[Variable]:
             for row in rows:
                 cells = row.find_all("td")
                 if len(cells) >= 2:
+                    raw_label = cells[1].get_text(strip=True)
+                    # ESS marks designated-missing categories (Refusal/Don't
+                    # know/No answer/etc.) with a trailing "*", explained by a
+                    # "*) Missing value" footnote after the table. Record that
+                    # as a proper flag instead of leaving it embedded in the
+                    # label text.
+                    is_missing = raw_label.endswith("*")
+                    category_label = raw_label[:-1].rstrip() if is_missing else raw_label
                     value_labels.append(
                         ValueLabel(
                             value=cells[0].get_text(strip=True),
-                            label=cells[1].get_text(strip=True),
+                            label=category_label,
+                            is_missing=is_missing,
                         )
                     )
 

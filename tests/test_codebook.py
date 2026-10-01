@@ -34,6 +34,16 @@ def test_variable_with_question_text():
     assert var.label_for("0") == "No access at home or work"
 
 
+def test_value_labels_flag_designated_missing_codes():
+    codebook = load_bundled_codebook()
+    var = codebook["stfeco"]
+    assert var.label_for("77") == "Refusal"
+    assert var.label_for("0") == "Extremely dissatisfied"
+    assert var.missing_values == {"77", "88", "99"}
+    for vl in var.value_labels:
+        assert vl.is_missing == (vl.value in {"77", "88", "99"})
+
+
 def test_attribute_access_for_variables():
     codebook = load_bundled_codebook()
     assert codebook.cntry is codebook["cntry"]
@@ -105,6 +115,7 @@ def test_from_html_minimal_document():
         <table><tbody>
           <tr><td>1</td><td>Yes</td></tr>
           <tr><td>2</td><td>No</td></tr>
+          <tr><td>9</td><td>No answer*</td></tr>
         </tbody></table>
       </div>
     </div>
@@ -117,3 +128,5 @@ def test_from_html_minimal_document():
     assert var.label == "Foo label"
     assert var.question_texts == ["Some question"]
     assert var.label_for("1") == "Yes"
+    assert var.label_for("9") == "No answer"
+    assert var.missing_values == {"9"}

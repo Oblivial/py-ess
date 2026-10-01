@@ -187,6 +187,39 @@ def test_load_local_csv_with_polars(tmp_path):
     ]
 
 
+def test_load_local_csv_recodes_missing_values_by_default(tmp_path):
+    """stfeco's codebook-designated codes 77/88/99 ("Refusal"/"Don't
+    know"/"No answer") should become NaN, same as the API's
+    recodeMissingValues=true, without having to ask for it explicitly."""
+    csv_path = tmp_path / "ess.csv"
+    csv_path.write_text(
+        "idno,cntry,stfeco\n1,DE,5\n2,DE,77\n3,DE,88\n4,DE,99\n5,DE,10\n",
+        encoding="utf-8",
+    )
+    ess = ESS(user_id=configured_user_id())
+
+    dataset = ess.load_local_csv(csv_path, variables=["stfeco"])
+
+    values = dataset["stfeco"].values
+    assert values[0] == 5
+    assert pd.isna(values[1])
+    assert pd.isna(values[2])
+    assert pd.isna(values[3])
+    assert values[4] == 10
+
+
+def test_load_local_csv_recode_missing_values_false_keeps_raw_codes(tmp_path):
+    csv_path = tmp_path / "ess.csv"
+    csv_path.write_text("idno,stfeco\n1,5\n2,77\n", encoding="utf-8")
+    ess = ESS(user_id=configured_user_id())
+
+    dataset = ess.load_local_csv(
+        csv_path, variables=["stfeco"], recode_missing_values=False
+    )
+
+    assert dataset["stfeco"].values == [5, 77]
+
+
 def test_load_local_csv_polars_infers_schema_from_full_file(tmp_path):
     """Regression test: a decimal value beyond Polars' sampled rows should
     not raise a parse error when full_schema_scan is enabled (the default).
