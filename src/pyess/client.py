@@ -106,30 +106,19 @@ class ESS:
         know/No answer/etc.) recorded in the bundled codebook (see
         ``Variable.missing_values``). Defaults to ``True`` so local CSVs and
         API downloads behave the same way out of the box.
+
+        A single local CSV typically stacks *every* ESS round together in
+        one file (unlike the API, which serves one round per request). Rounds
+        differ in which columns they populate at all (e.g. ``anweight`` and
+        ``inwyys`` don't exist until later rounds) - that's invisible here,
+        since every column in the merged file is kept regardless of which
+        round(s) actually populated it. If you need each round's own
+        subset of real (non-blank) columns - e.g. to replicate the
+        per-round shape the API serves - use :meth:`load_local_csv_by_round`
+        instead.
         """
-        if engine == "pandas":
-            dataframe = pd.read_csv(path)
-        elif engine == "polars":
-            try:
-                import polars as pl
-            except ImportError as exc:
-                raise ImportError(
-                    "Polars support requires the optional dependency; "
-                    "install it with `pip install py-ess[polars]`."
-                ) from exc
-            infer_schema_length = None if full_schema_scan else 100
-            dataframe = pl.read_csv(path, infer_schema_length=infer_schema_length)
-        else:
-            raise ValueError(
-                f"Unsupported engine {engine!r}; expected 'pandas' or 'polars'"
-            )
-        requested = list(dict.fromkeys(variables or []))
-        missing = [variable for variable in requested if variable not in dataframe]
-        if missing:
-            raise KeyError(
-                f"ESS CSV {str(path)!r} is missing variable(s): {', '.join(missing)}. "
-                f"Available columns: {', '.join(map(str, dataframe.columns))}"
-            )
+        dataframe = self._read_local_csv(path, engine, full_schema_scan)
+        requested = self._validate_requested_variables(dataframe, variables, path)
         if recode_missing_values:
             # Only touch the columns actually requested, if any were: with
             # hundreds of columns in a full ESS datafile, recoding every one
@@ -139,6 +128,140 @@ class ESS:
                 dataframe, self.codebook, columns=requested or None
             )
         return Dataset(dataframe, codebook=self.codebook)
+
+    def load_local_csv_by_round(
+        self,
+        path: str | Path,
+        variables: Iterable[str] | None = None,
+        engine: Literal["pandas", "polars"] = "pandas",
+        full_schema_scan: bool = True,
+        recode_missing_values: bool = True,
+        round_column: str = "essround",
+    ) -> dict[str, Dataset]:
+        """Load a merged local ESS CSV and split it into one :class:`Dataset`
+        per round, keyed by that round's DOI - mirroring how :meth:`load`
+        returns one dataset per round when fetched from the API, instead of
+        :meth:`load_local_csv`'s single dataframe spanning every round.
+
+        This matters because ESS rounds differ in which columns they
+        populate at all (e.g. ``anweight`` doesn't exist before round 4;
+        ``inwyys`` doesn't exist before round 3). Code that picks "the best
+        available column" out of several candidates (as callers commonly do
+        for weight/year columns) needs to make that choice *per round*, the
+        same way it naturally would when loading each round from the API
+        separately - otherwise a single dataframe spanning every round can
+        make that choice once globally and silently lose every row from
+        whichever round doesn't populate the chosen column. Each per-round
+        dataframe returned here drops columns that are entirely absent
+        (NaN) for that specific round, so "the first candidate column
+        present" is correct again without the caller needing any
+        round-awareness of its own.
+
+        Parameters are otherwise identical to :meth:`load_local_csv`, plus:
+
+        round_column:
+            Column identifying the ESS round number (e.g. ``1``, ``2``, ...).
+            Defaults to ``"essround"``, the standard ESS column name. Each
+            distinct round number present is matched to a codebook round via
+            its short label (``f"ESS{number}"``); round numbers with no
+            matching codebook round are skipped with a warning (this can
+            happen for a malformed/foreign ``round_column`` value).
+
+        Note: a column is considered "absent for a round" based on its *raw*
+        values, before missing-value recoding - so a column is only dropped
+        if the round's rows for it are blank in the source file (truly not
+        collected), not merely because every respondent who *did* answer
+        happened to decline (e.g. all "Don't know"). Recoding happens after
+        the split, per round, so it can never influence which columns a
+        round keeps.
+        """
+        dataframe = self._read_local_csv(path, engine, full_schema_scan)
+        requested = self._validate_requested_variables(dataframe, variables, path)
+        if round_column not in dataframe.columns:
+            raise KeyError(
+                f"ESS CSV {str(path)!r} is missing the round-identifying column "
+                f"{round_column!r}; cannot split it by round. Available columns: "
+                f"{', '.join(map(str, dataframe.columns))}"
+            )
+        datasets = self._split_by_round(dataframe, round_column)
+        if recode_missing_values:
+            datasets = {
+                doi: Dataset(
+                    _recode_missing_values(
+                        dataset.dataframe, self.codebook, columns=requested or None
+                    ),
+                    datafile=dataset.datafile,
+                    codebook=self.codebook,
+                )
+                for doi, dataset in datasets.items()
+            }
+        return datasets
+
+    def _read_local_csv(
+        self, path: str | Path, engine: Literal["pandas", "polars"], full_schema_scan: bool
+    ) -> Any:
+        if engine == "pandas":
+            return pd.read_csv(path)
+        if engine == "polars":
+            try:
+                import polars as pl
+            except ImportError as exc:
+                raise ImportError(
+                    "Polars support requires the optional dependency; "
+                    "install it with `pip install py-ess[polars]`."
+                ) from exc
+            infer_schema_length = None if full_schema_scan else 100
+            return pl.read_csv(path, infer_schema_length=infer_schema_length)
+        raise ValueError(f"Unsupported engine {engine!r}; expected 'pandas' or 'polars'")
+
+    @staticmethod
+    def _validate_requested_variables(
+        dataframe: Any, variables: Iterable[str] | None, path: str | Path
+    ) -> list[str]:
+        requested = list(dict.fromkeys(variables or []))
+        missing = [variable for variable in requested if variable not in dataframe]
+        if missing:
+            raise KeyError(
+                f"ESS CSV {str(path)!r} is missing variable(s): {', '.join(missing)}. "
+                f"Available columns: {', '.join(map(str, dataframe.columns))}"
+            )
+        return requested
+
+    def _split_by_round(self, dataframe: Any, round_column: str) -> dict[str, Dataset]:
+        is_polars = not isinstance(dataframe, pd.DataFrame)
+        if is_polars:
+            import polars as pl
+
+            numbers = dataframe[round_column].cast(pl.Float64, strict=False)
+            unique_numbers = sorted({n for n in numbers.to_list() if n is not None})
+        else:
+            numbers = pd.to_numeric(dataframe[round_column], errors="coerce")
+            unique_numbers = sorted(numbers.dropna().unique().tolist())
+
+        datasets: dict[str, Dataset] = {}
+        for number in unique_numbers:
+            round_obj = self.codebook.get_round(f"ESS{int(number)}")
+            if round_obj is None:
+                logger.warning(
+                    "No codebook round found for %s=%s; skipping these rows.",
+                    round_column,
+                    number,
+                )
+                continue
+            if is_polars:
+                round_df = dataframe.filter(numbers == number)
+                keep_columns = [
+                    c for c in round_df.columns if round_df[c].null_count() < round_df.height
+                ]
+                round_df = round_df.select(keep_columns)
+            else:
+                round_df = dataframe.loc[numbers == number].reset_index(drop=True)
+                round_df = round_df.dropna(axis=1, how="all")
+            datasets[round_obj.doi] = Dataset(
+                round_df, datafile=round_obj, codebook=self.codebook
+            )
+        return datasets
+
 
     # -- codebook (static metadata) --------------------------------------
     @property

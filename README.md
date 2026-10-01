@@ -144,6 +144,64 @@ same explanatory error. When `variables` is supplied, missing-value recoding
 (see below) is also limited to just those columns, which is considerably
 faster than recoding every column in a full ESS datafile.
 
+#### Splitting a merged local CSV by round
+
+A local CSV typically bundles *every* ESS round together in one file (unlike
+the API, which serves one round per request), and rounds differ in which
+columns they even have (e.g. `anweight` doesn't exist before round 4;
+`inwyys` doesn't exist before round 3). If your code picks "the best
+available column" out of several candidates (a common pattern for weight or
+interview-year columns), doing that over the whole merged file can silently
+make the wrong row-level choice for whichever round doesn't populate the
+column it picked.
+
+`load_local_csv_by_round` avoids this by splitting the file into one
+`Dataset` per round, keyed by that round's DOI - exactly like loading each
+round from the API separately, so the same "pick the first present column"
+logic works correctly either way:
+
+```python
+datasets = ess.load_local_csv_by_round(
+    "path/to/merged_ess.csv",
+    variables=["cntry", "stfeco"],
+)
+datasets["10.21338/ess11e04_2"]["stfeco"].decoded()
+```
+
+Each returned dataset only keeps columns that have at least one real (raw,
+pre-recoding) value for that specific round; columns that are entirely blank
+for a round are dropped, so callers never have to reason about per-round
+column availability themselves. The round-identifying column defaults to
+`essround` (override with `round_column=...` if yours differs).
+
+### File formats
+
+`ess.load(...)` / `ess.load_round(...)` accept `file_format="parquet"` (default), `"csv"`,
+`"sav"` (SPSS), or `"dta"` (Stata) - the wire format the datafile is downloaded in.
+
+### Missing-value recoding
+
+ESS codes don't-know/refused/no-answer/not-applicable-style responses as
+designated-missing values (e.g. `77`/`88`/`99` for a 0-10 scale), rather than
+leaving them blank. `recode_missing_values` (default `True` on `ess.load(...)`,
+`ess.load_local_csv(...)`, and `ess.load_local_csv_by_round(...)`) recodes
+those to system missing (`NaN`/`null`) so they don't silently skew statistics
+computed over the raw column. Set it to `False` to get the original,
+undecoded codes back.
+
+The *mechanism* differs depending on where the data comes from, but the
+result is the same either way:
+
+- `ess.load(...)` / `ess.load_round(...)` / `ess.load_variable(...)`: the
+  flag is sent to the ESS API as `recodeMissingValues=true`, so recoding
+  happens server-side, before the file is even downloaded.
+- `ess.load_local_csv(...)` / `ess.load_local_csv_by_round(...)`: there is no
+  server to ask, since the file is already on disk. Instead, py-ess recodes
+  it locally, using the designated-missing value codes recorded in the
+  bundled codebook (parsed from each variable's "*) Missing value"-flagged
+  categories, e.g. "Refusal", "Don't know", "No answer" - see
+  `Variable.missing_values`).
+
 ### `[]` vs. `.` access
 
 Both `dataset["cntry"]` and `dataset.cntry` (likewise `codebook["cntry"]` / `codebook.cntry`)
@@ -165,32 +223,6 @@ dataset.to_records()         # list of per-respondent dicts, no metadata
 import json
 json.dumps(dataset.to_dict())
 ```
-
-### File formats
-
-`ess.load(...)` / `ess.load_round(...)` accept `file_format="parquet"` (default), `"csv"`,
-`"sav"` (SPSS), or `"dta"` (Stata) - the wire format the datafile is downloaded in.
-
-### Missing-value recoding
-
-ESS codes don't-know/refused/no-answer/not-applicable-style responses as
-designated-missing values (e.g. `77`/`88`/`99` for a 0-10 scale), rather than
-leaving them blank. `recode_missing_values` (default `True` on both
-`ess.load(...)` and `ess.load_local_csv(...)`) recodes those to system
-missing (`NaN`/`null`) so they don't silently skew statistics computed over
-the raw column. Set it to `False` to get the original, undecoded codes back.
-
-The *mechanism* differs depending on where the data comes from, but the
-result is the same either way:
-
-- `ess.load(...)` / `ess.load_round(...)` / `ess.load_variable(...)`: the
-  flag is sent to the ESS API as `recodeMissingValues=true`, so recoding
-  happens server-side, before the file is even downloaded.
-- `ess.load_local_csv(...)`: there is no server to ask, since the file is
-  already on disk. Instead, py-ess recodes it locally, using the
-  designated-missing value codes recorded in the bundled codebook (parsed
-  from each variable's "*) Missing value"-flagged categories, e.g. "Refusal",
-  "Don't know", "No answer" - see `Variable.missing_values`).
 
 ### The `userId` parameter
 

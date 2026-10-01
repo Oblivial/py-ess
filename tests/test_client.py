@@ -256,3 +256,109 @@ def test_dataset_missing_variable_lists_available_columns(tmp_path):
 
     with pytest.raises(KeyError, match="stfeco.*Available columns: idno, cntry"):
         dataset["stfeco"]
+
+
+class TestLoadLocalCsvByRound:
+    def test_splits_merged_file_into_one_dataset_per_round(self, tmp_path):
+        csv_path = tmp_path / "ess.csv"
+        csv_path.write_text(
+            "idno,essround,cntry,stfeco\n"
+            "1,1,DE,5\n"
+            "2,1,FR,6\n"
+            "3,2,DE,7\n",
+            encoding="utf-8",
+        )
+        ess = ESS(user_id=configured_user_id())
+
+        datasets = ess.load_local_csv_by_round(csv_path, variables=["stfeco"])
+
+        assert set(datasets) == {"10.21338/ess1e06_7", "10.21338/ess2e03_6"}
+        round1 = datasets["10.21338/ess1e06_7"]
+        assert len(round1) == 2
+        assert round1["cntry"].values == ["DE", "FR"]
+        round2 = datasets["10.21338/ess2e03_6"]
+        assert len(round2) == 1
+        assert round2["stfeco"].values == [7]
+
+    def test_drops_columns_entirely_absent_for_a_given_round(self, tmp_path):
+        """Regression test: a merged local CSV can have a column (e.g. a
+        weight or year column) populated for one round but entirely blank
+        for another - each per-round Dataset should only keep columns that
+        actually have data for that specific round, so "pick the first
+        present column" logic downstream behaves the same as it would
+        loading each round from the API separately."""
+        csv_path = tmp_path / "ess.csv"
+        csv_path.write_text(
+            "idno,essround,cntry,anweight,pspwght\n"
+            "1,1,DE,,0.9\n"
+            "2,2,DE,1.1,0.8\n",
+            encoding="utf-8",
+        )
+        ess = ESS(user_id=configured_user_id())
+
+        datasets = ess.load_local_csv_by_round(csv_path)
+
+        round1 = datasets["10.21338/ess1e06_7"]
+        assert "anweight" not in round1.columns
+        assert "pspwght" in round1.columns
+        round2 = datasets["10.21338/ess2e03_6"]
+        assert "anweight" in round2.columns
+        assert "pspwght" in round2.columns
+
+    def test_recodes_missing_values_per_round(self, tmp_path):
+        csv_path = tmp_path / "ess.csv"
+        csv_path.write_text(
+            "idno,essround,cntry,stfeco\n"
+            "1,1,DE,5\n"
+            "2,1,DE,77\n"
+            "3,2,DE,88\n",
+            encoding="utf-8",
+        )
+        ess = ESS(user_id=configured_user_id())
+
+        datasets = ess.load_local_csv_by_round(csv_path, variables=["stfeco"])
+
+        round1_values = datasets["10.21338/ess1e06_7"]["stfeco"].values
+        assert round1_values[0] == 5
+        assert pd.isna(round1_values[1])
+        round2_values = datasets["10.21338/ess2e03_6"]["stfeco"].values
+        assert pd.isna(round2_values[0])
+
+    def test_missing_round_column_raises_clear_error(self, tmp_path):
+        csv_path = tmp_path / "ess.csv"
+        csv_path.write_text("idno,cntry\n1,DE\n", encoding="utf-8")
+        ess = ESS(user_id=configured_user_id())
+
+        with pytest.raises(KeyError, match="essround"):
+            ess.load_local_csv_by_round(csv_path)
+
+    def test_unknown_round_number_is_skipped_with_warning(self, tmp_path, caplog):
+        csv_path = tmp_path / "ess.csv"
+        csv_path.write_text(
+            "idno,essround,cntry\n1,1,DE\n2,9999,DE\n",
+            encoding="utf-8",
+        )
+        ess = ESS(user_id=configured_user_id())
+
+        with caplog.at_level("WARNING", logger="pyess"):
+            datasets = ess.load_local_csv_by_round(csv_path)
+
+        assert set(datasets) == {"10.21338/ess1e06_7"}
+        assert "9999" in caplog.text
+
+    def test_with_polars_engine(self, tmp_path):
+        pl = pytest.importorskip("polars")
+        csv_path = tmp_path / "ess.csv"
+        csv_path.write_text(
+            "idno,essround,cntry,anweight\n"
+            "1,1,DE,\n"
+            "2,2,DE,1.1\n",
+            encoding="utf-8",
+        )
+        ess = ESS(user_id=configured_user_id())
+
+        datasets = ess.load_local_csv_by_round(csv_path, engine="polars")
+
+        assert isinstance(datasets["10.21338/ess1e06_7"].dataframe, pl.DataFrame)
+        assert "anweight" not in datasets["10.21338/ess1e06_7"].columns
+        assert "anweight" in datasets["10.21338/ess2e03_6"].columns
