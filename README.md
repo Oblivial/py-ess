@@ -215,8 +215,7 @@ up which datafile/DOI you need, download it, and only then dig around inside it.
 that: **variables are the primary thing you index by**, and each variable already knows which
 ESS round(s) it was collected in. It also joins the official ESS "Datafile codebook" (~2,800
 variables across all rounds) to whatever datafile you load, so coded survey data becomes
-self-describing, adds on-disk caching so repeat loads are instant, and generates a stable
-anonymous identifier for the API's mandatory `userId` parameter.
+self-describing, adds on-disk caching so repeat loads are instant.
 
 ## Internals: where the variable ↔ round mapping comes from
 
